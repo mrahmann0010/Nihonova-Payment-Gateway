@@ -16,11 +16,13 @@ async function resetDatabase() {
 
     console.log("[RESET] Database dropped successfully.");
 
-    // Optional: recreate collections (MongoDB will auto-create on insert anyway)
-    await db.createCollection("payments");
-    await db.createCollection("transactions");
+    // Optional: recreate the per-platform collections (MongoDB auto-creates
+    // them on first insert anyway).
+    await db.createCollection("bkash");
+    await db.createCollection("nagad");
+    await db.createCollection("rocket");
 
-    console.log("[RESET] Collections initialized in primary-data.");
+    console.log("[RESET] Collections initialized: bkash, nagad, rocket.");
 
     process.exit(0);
   } catch (err) {

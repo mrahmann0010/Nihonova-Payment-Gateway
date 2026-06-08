@@ -1,7 +1,7 @@
 // webhook.js — handles incoming SMS Gateway payloads.
 //
 // Route:  POST /webhooks/sms?token=<secret>
-// Auth:   URL token verified by verifySignature middleware (applied in server.js).
+// Auth:   URL token verified by verifySignature middleware (applied in app.js).
 //
 // Payload from "Incoming SMS to URL Forwarder" Android app:
 //   { from, text, sentStamp, receivedStamp, sim }
@@ -9,16 +9,26 @@
 // Flow:
 //   1. Check ALLOWED_SENDERS filter — return 200 immediately if not allowed
 //      so the gateway doesn't retry irrelevant messages.
-//   2. Try to parse the SMS text as a bKash transaction.
-//   3. Only "received" type messages (Send Money received) are stored.
-//      Deposits and outgoing payments are acknowledged but discarded.
-//   4. If parsed and type=received → save to Transaction (trxId unique index = idempotency key).
-//   5. If not parsed → log and acknowledge; nothing saved.
+//   2. Detect the payment platform (bKash / Nagad / Rocket) and parse the text.
+//   3. Only "received" (incoming money) messages are recognized; everything
+//      else is acknowledged but discarded.
+//   4. Save to the matching per-platform collection. trxId has a unique index
+//      per collection, so it doubles as an idempotency key.
 
-const express     = require('express');
-const router      = express.Router();
-const Transaction = require('../models/Transaction');
-const parseBkashSms = require('../services/bkashParser');
+const express      = require('express');
+const router       = express.Router();
+const parsePayment = require('../services/parsePayment');
+
+const Bkash  = require('../models/Bkash');
+const Nagad  = require('../models/Nagad');
+const Rocket = require('../models/Rocket');
+
+// Maps a parsed platform name to its Mongoose model.
+const MODELS = {
+  bkash:  Bkash,
+  nagad:  Nagad,
+  rocket: Rocket,
+};
 
 // ALLOWED_SENDERS — comma-separated list of sender IDs/numbers to accept.
 // Use * to accept SMS from any sender.
@@ -37,7 +47,7 @@ if (ACCEPT_ALL) {
 // ---------------------------------------------------------------------------
 router.post('/sms', async (req, res) => {
   // The app sends: from, text, sentStamp (epoch ms), receivedStamp (epoch ms), sim
-  const { from: sender, text, receivedStamp, sim } = req.body;
+  const { from: sender, text, sim } = req.body;
 
   // sim arrives as a string (e.g. "1", "2", "SIM 1") — extract the first digit.
   const simNumber = sim != null ? parseInt(String(sim).replace(/\D/g, ''), 10) || null : null;
@@ -48,49 +58,54 @@ router.post('/sms', async (req, res) => {
     return res.status(200).json({ received: true, processed: false });
   }
 
-  // --- Step 2: parse SMS text ---
-  const parsed = parseBkashSms(text || '');
+  // --- Step 2: detect platform + parse ---
+  const parsed = parsePayment(text || '');
 
   if (!parsed) {
-    console.warn(`[Webhook] Unmatched SMS from "${sender}" — not stored (no bKash pattern found)`);
+    console.warn(`[Webhook] Unmatched SMS from "${sender}" — not stored (no known payment pattern)`);
     return res.status(200).json({ received: true, processed: false, reason: 'unmatched' });
   }
 
-  // Only record incoming payments (Send Money received).
-  // Deposits and outgoing payments are silently acknowledged but not stored.
-  if (parsed.type !== 'received') {
-    console.log(`[Webhook] Skipped non-received SMS type "${parsed.type}" from "${sender}"`);
-    return res.status(200).json({ received: true, processed: false, reason: 'not_received_type' });
+  const Model = MODELS[parsed.platform];
+  if (!Model) {
+    // Defensive — should never happen since parsePayment only emits known platforms.
+    console.error(`[Webhook] No model for platform "${parsed.platform}"`);
+    return res.status(200).json({ received: true, processed: false, reason: 'unknown_platform' });
   }
 
-  // --- Step 3: save to Transaction ---
+  // --- Step 3: save to the platform's collection ---
   try {
-    const doc = new Transaction({
-      type:          parsed.type,
-      amount:        parsed.amount,
-      sender:        parsed.senderNumber || sender,
-      balance:       parsed.balance,
-      trxId:         parsed.trxid,
-      dateReceived:  parsed.bkashTimestamp,
-      timeReceived:  parsed.rawTime,
+    const doc = new Model({
+      amount:       parsed.amount,
+      sender:       parsed.sender || sender,
+      fee:          parsed.fee,
+      balance:      parsed.balance,
+      trxId:        parsed.trxId,
+      dateReceived: parsed.dateReceived,
+      timeReceived: parsed.rawTime,
+      rawDate:      parsed.rawDate,
       simNumber,
-      paymentMethod: 'bkash',
-      rawMessage:    text,
+      rawMessage:   text,
+      ...(parsed.ref != null ? { ref: parsed.ref } : {}),
     });
 
     await doc.save();
 
     console.log(
-      `[Webhook] Saved — trxId: ${parsed.trxid}, amount: ${parsed.amount}, sender: ${doc.sender}`
+      `[Webhook] Saved ${parsed.platform} — trxId: ${parsed.trxId}, amount: ${parsed.amount}, sender: ${doc.sender}`
     );
 
-    return res.status(200).json({ received: true, processed: true, trxId: parsed.trxid });
-
+    return res.status(200).json({
+      received: true,
+      processed: true,
+      platform: parsed.platform,
+      trxId: parsed.trxId,
+    });
   } catch (err) {
     // Duplicate trxId — already stored from a previous delivery attempt.
     // Return 200 so the gateway stops retrying.
     if (err.code === 11000) {
-      console.log(`[Webhook] Duplicate trxId ignored — ${parsed.trxid}`);
+      console.log(`[Webhook] Duplicate trxId ignored — ${parsed.platform}/${parsed.trxId}`);
       return res.status(200).json({ received: true, processed: false, reason: 'duplicate' });
     }
 

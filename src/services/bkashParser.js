@@ -9,6 +9,8 @@
 //   2. Cash In deposit      — "You have received a deposit of BDT <amount> from ..."
 //   3. Merchant / Pay Bill  — "Payment Tk <amount> to <merchant> from <phone>..."
 
+const { bdtToUtc } = require('./timeUtil');
+
 // ---------------------------------------------------------------------------
 // Helper — strip commas from number strings like "1,200.00" → "1200.00"
 // then parse to float. Returns NaN if the value is not a valid number.
@@ -19,21 +21,13 @@ function parseAmount(str) {
 
 // ---------------------------------------------------------------------------
 // Helper — convert the "dd/mm/yyyy hh:mm" timestamp found in bKash SMS text
-// into a JavaScript Date object (UTC).
-//
-// bKash prints dates in Bangladeshi local time (UTC+6). We convert to UTC by
-// subtracting 6 hours so the Date stored in MongoDB is timezone-neutral.
+// into a JavaScript Date object (UTC). bKash prints local BDT (UTC+6) time.
 // ---------------------------------------------------------------------------
 function parseBkashDate(dateStr, timeStr) {
   // dateStr e.g. "08/06/2026", timeStr e.g. "14:32"
   const [day, month, year] = dateStr.split('/').map(Number);
   const [hour, minute] = timeStr.split(':').map(Number);
-
-  // Month is 0-indexed in JS Date constructor.
-  // We build the local BDT time then subtract 6h to get UTC.
-  const bdtMs = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-  const utcMs = bdtMs - 6 * 60 * 60 * 1000; // subtract UTC+6 offset
-  return new Date(utcMs);
+  return bdtToUtc(year, month, day, hour, minute);
 }
 
 // ---------------------------------------------------------------------------
