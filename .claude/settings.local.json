@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(mkdir -p /Users/moshiurrahman/Desktop/June/smsServer/src/config \\\\ *)"
+    ],
+    "additionalDirectories": [
+      "/Users/moshiurrahman/Desktop/June/smsServer/src"
+    ]
+  }
+}
