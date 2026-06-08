@@ -41,15 +41,15 @@ router.post('/sms', async (req, res) => {
   const simNumber = sim != null ? parseInt(String(sim).replace(/\D/g, ''), 10) || null : null;
 
   // --- Step 1: sender filter ---
-  // Read from process.env on each request so a server restart with updated
-  // .env is always reflected without stale module-level constants.
-  const allowedSenders = (process.env.ALLOWED_SENDERS || '*')
-    .split(',')
-    .map((s) => s.trim().toLowerCase());
-  const acceptAll = allowedSenders.includes('*');
+  const knownSenders = [
+    process.env.BKASH_SENDER,
+    process.env.NAGAD_SENDER,
+    process.env.ROCKET_SENDER,
+  ].filter(Boolean).map((s) => s.trim().toLowerCase());
 
-  if (!acceptAll && !allowedSenders.includes((sender || '').toLowerCase())) {
-    console.log(`[Webhook] Ignored sender not in allowlist: "${sender}" (allowed: ${allowedSenders.join(', ')})`);
+  const senderLower = (sender || '').toLowerCase();
+  if (knownSenders.length > 0 && !knownSenders.includes(senderLower)) {
+    console.log(`[Webhook] Ignored unknown sender: "${sender}"`);
     return res.status(200).json({ received: true, processed: false });
   }
 
