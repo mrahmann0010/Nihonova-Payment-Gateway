@@ -20,13 +20,15 @@ const Payment = require('../models/Payment');
 const parseBkashSms = require('../services/bkashParser');
 
 // ---------------------------------------------------------------------------
-// Known bKash sender IDs loaded from env at module init time.
-// BKASH_SENDER_IDS is a comma-separated list, e.g. "bKash,16247".
-// We normalise to lowercase for case-insensitive comparison.
+// ALLOWED_SENDERS — comma-separated list of sender IDs/numbers to accept.
+// Use * to accept SMS from any sender.
+// Example: "bKash,16247,01522112743" or "*"
 // ---------------------------------------------------------------------------
-const BKASH_SENDERS = (process.env.BKASH_SENDER_IDS || 'bKash')
+const ALLOWED_SENDERS = (process.env.ALLOWED_SENDERS || '*')
   .split(',')
   .map((s) => s.trim().toLowerCase());
+
+const ACCEPT_ALL = ALLOWED_SENDERS.includes('*');
 
 // ---------------------------------------------------------------------------
 // POST /webhooks/sms
@@ -45,8 +47,8 @@ router.post('/sms', async (req, res) => {
   // If this SMS didn't come from a known bKash sender, acknowledge and discard.
   // We return 200 (not 4xx) because a non-200 response triggers the SMS Gateway
   // app's retry logic, which would spam us with the same irrelevant message.
-  if (!BKASH_SENDERS.includes((sender || '').toLowerCase())) {
-    console.log(`[Webhook] Ignored non-bKash sender: "${sender}"`);
+  if (!ACCEPT_ALL && !ALLOWED_SENDERS.includes((sender || '').toLowerCase())) {
+    console.log(`[Webhook] Ignored sender not in allowlist: "${sender}"`);
     return res.status(200).json({ received: true, processed: false });
   }
 
