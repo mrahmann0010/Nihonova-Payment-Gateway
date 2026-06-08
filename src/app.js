@@ -27,6 +27,10 @@ app.use(async (req, res, next) => {
   }
 });
 
+app.get('/', (_req, res) => {
+  res.json({ status: 'running', message: 'bKash SMS Webhook Server is up.' });
+});
+
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/webhooks', verifySignature, webhookRouter);
