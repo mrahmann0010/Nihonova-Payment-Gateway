@@ -30,18 +30,6 @@ const MODELS = {
   rocket: Rocket,
 };
 
-// ALLOWED_SENDERS — comma-separated list of sender IDs/numbers to accept.
-// Use * to accept SMS from any sender.
-const ALLOWED_SENDERS = (process.env.ALLOWED_SENDERS || '*')
-  .split(',')
-  .map((s) => s.trim().toLowerCase());
-
-const ACCEPT_ALL = ALLOWED_SENDERS.includes('*');
-
-if (ACCEPT_ALL) {
-  console.warn('[Webhook] ALLOWED_SENDERS=* — accepting SMS from any sender. Set a specific sender list in production.');
-}
-
 // ---------------------------------------------------------------------------
 // POST /webhooks/sms
 // ---------------------------------------------------------------------------
@@ -53,8 +41,15 @@ router.post('/sms', async (req, res) => {
   const simNumber = sim != null ? parseInt(String(sim).replace(/\D/g, ''), 10) || null : null;
 
   // --- Step 1: sender filter ---
-  if (!ACCEPT_ALL && !ALLOWED_SENDERS.includes((sender || '').toLowerCase())) {
-    console.log(`[Webhook] Ignored sender not in allowlist: "${sender}"`);
+  // Read from process.env on each request so a server restart with updated
+  // .env is always reflected without stale module-level constants.
+  const allowedSenders = (process.env.ALLOWED_SENDERS || '*')
+    .split(',')
+    .map((s) => s.trim().toLowerCase());
+  const acceptAll = allowedSenders.includes('*');
+
+  if (!acceptAll && !allowedSenders.includes((sender || '').toLowerCase())) {
+    console.log(`[Webhook] Ignored sender not in allowlist: "${sender}" (allowed: ${allowedSenders.join(', ')})`);
     return res.status(200).json({ received: true, processed: false });
   }
 
