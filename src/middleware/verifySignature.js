@@ -13,10 +13,15 @@ const crypto = require('crypto');
 function verifySignature(req, res, next) {
   const secret = process.env.WEBHOOK_SECRET;
 
-  // If no secret is configured (or still the placeholder), skip auth.
-  // Always set a real secret in production.
-  if (!secret || secret === 'your-shared-secret-here') {
-    console.warn('[Auth] WEBHOOK_SECRET not configured — auth disabled');
+  // In production, a missing or placeholder secret is a misconfiguration —
+  // reject all requests rather than silently exposing the endpoint.
+  const isPlaceholder = !secret || secret === 'your-shared-secret-here';
+  if (isPlaceholder) {
+    if (process.env.NODE_ENV === 'production') {
+      console.error('[Auth] WEBHOOK_SECRET not configured in production — rejecting request');
+      return res.status(503).json({ error: 'Server misconfigured' });
+    }
+    console.warn('[Auth] WEBHOOK_SECRET not configured — auth disabled (dev only)');
     return next();
   }
 

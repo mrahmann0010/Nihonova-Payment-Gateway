@@ -2,6 +2,13 @@ const mongoose = require("mongoose");
 
 const transactionSchema = new mongoose.Schema(
   {
+    // "received" | "deposit" | "payment" — set by the SMS parser.
+    type: {
+      type: String,
+      enum: ["received", "deposit", "payment"],
+      required: true,
+    },
+
     amount: {
       type: Number,
       required: true,
@@ -29,6 +36,7 @@ const transactionSchema = new mongoose.Schema(
     dateReceived: {
       type: Date,
       required: true,
+      index: true,
     },
 
     // Local Bangladesh time string ("HH:MM") printed inside the SMS.
@@ -37,6 +45,12 @@ const transactionSchema = new mongoose.Schema(
     timeReceived: {
       type: String,
       required: true,
+    },
+
+    // SIM slot the gateway received the SMS on (1, 2, …). Null when unknown.
+    simNumber: {
+      type: Number,
+      default: null,
     },
 
     paymentMethod: {

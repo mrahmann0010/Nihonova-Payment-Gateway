@@ -5,6 +5,11 @@ const connectDB      = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
 
+if (!process.env.MONGO_URI) {
+  console.error('[Config] MONGO_URI is not set. Server cannot start without a database connection.');
+  process.exit(1);
+}
+
 const app = express();
 
 app.use(
@@ -36,5 +41,17 @@ app.get('/', (_req, res) => {
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 app.use('/webhooks', verifySignature, webhookRouter);
+
+// 404 — no route matched
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Global error handler — catches anything thrown by route handlers
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  console.error('[App] Unhandled error:', err.message);
+  res.status(500).json({ error: 'Internal server error' });
+});
 
 module.exports = app;

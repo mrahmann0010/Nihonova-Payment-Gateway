@@ -10,9 +10,10 @@
 //   1. Check ALLOWED_SENDERS filter — return 200 immediately if not allowed
 //      so the gateway doesn't retry irrelevant messages.
 //   2. Try to parse the SMS text as a bKash transaction.
-//   3. If parsed → save to Transaction (trxId unique index = idempotency key).
-//   4. If not parsed → log and acknowledge; nothing saved (Transaction schema
-//      requires bKash-specific fields).
+//   3. Only "received" type messages (Send Money received) are stored.
+//      Deposits and outgoing payments are acknowledged but discarded.
+//   4. If parsed and type=received → save to Transaction (trxId unique index = idempotency key).
+//   5. If not parsed → log and acknowledge; nothing saved.
 
 const express     = require('express');
 const router      = express.Router();
@@ -26,6 +27,10 @@ const ALLOWED_SENDERS = (process.env.ALLOWED_SENDERS || '*')
   .map((s) => s.trim().toLowerCase());
 
 const ACCEPT_ALL = ALLOWED_SENDERS.includes('*');
+
+if (ACCEPT_ALL) {
+  console.warn('[Webhook] ALLOWED_SENDERS=* — accepting SMS from any sender. Set a specific sender list in production.');
+}
 
 // ---------------------------------------------------------------------------
 // POST /webhooks/sms
@@ -51,15 +56,24 @@ router.post('/sms', async (req, res) => {
     return res.status(200).json({ received: true, processed: false, reason: 'unmatched' });
   }
 
+  // Only record incoming payments (Send Money received).
+  // Deposits and outgoing payments are silently acknowledged but not stored.
+  if (parsed.type !== 'received') {
+    console.log(`[Webhook] Skipped non-received SMS type "${parsed.type}" from "${sender}"`);
+    return res.status(200).json({ received: true, processed: false, reason: 'not_received_type' });
+  }
+
   // --- Step 3: save to Transaction ---
   try {
     const doc = new Transaction({
+      type:          parsed.type,
       amount:        parsed.amount,
       sender:        parsed.senderNumber || sender,
       balance:       parsed.balance,
       trxId:         parsed.trxid,
       dateReceived:  parsed.bkashTimestamp,
       timeReceived:  parsed.rawTime,
+      simNumber,
       paymentMethod: 'bkash',
       rawMessage:    text,
     });
