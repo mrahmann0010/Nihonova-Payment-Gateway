@@ -27,6 +27,8 @@ app.use(async (req, res, next) => {
   }
 });
 
+app.get('/favicon.ico', (_req, res) => res.status(204).end());
+
 app.get('/', (_req, res) => {
   res.json({ status: 'running', message: 'bKash SMS Webhook Server is up.' });
 });

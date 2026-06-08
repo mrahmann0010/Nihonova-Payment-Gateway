@@ -120,6 +120,8 @@ function parseBkashSms(text) {
       balance: parseAmount(balance),
       trxid: trxid.toUpperCase(),
       bkashTimestamp: parseBkashDate(date, time),
+      rawDate: date,
+      rawTime: time,
     };
   }
 
@@ -131,11 +133,13 @@ function parseBkashSms(text) {
     return {
       type: 'deposit',
       amount: parseAmount(amount),
-      senderNumber: null, // Cash In doesn't include a sender phone number
+      senderNumber: null,
       fee: parseAmount(fee),
       balance: parseAmount(balance),
       trxid: trxid.toUpperCase(),
       bkashTimestamp: parseBkashDate(date, time),
+      rawDate: date,
+      rawTime: time,
     };
   }
 
@@ -152,6 +156,8 @@ function parseBkashSms(text) {
       balance: parseAmount(balance),
       trxid: trxid.toUpperCase(),
       bkashTimestamp: parseBkashDate(date, time),
+      rawDate: date,
+      rawTime: time,
     };
   }
 
