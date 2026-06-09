@@ -4,6 +4,7 @@ const express        = require('express');
 const connectDB      = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
+const homePage       = require('./views/home');
 
 if (!process.env.MONGO_URI) {
   console.error('[Config] MONGO_URI is not set. Server cannot start without a database connection.');
@@ -35,7 +36,8 @@ app.use(async (req, res, next) => {
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
 app.get('/', (_req, res) => {
-  res.json({ status: 'running', message: 'Payment SMS Webhook Server is up (bKash, Nagad, Rocket).' });
+  res.setHeader('Content-Type', 'text/html');
+  res.send(homePage());
 });
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
