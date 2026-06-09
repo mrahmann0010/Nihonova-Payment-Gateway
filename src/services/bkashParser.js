@@ -93,6 +93,23 @@ const PAYMENT_REGEX = new RegExp(
 );
 
 // ---------------------------------------------------------------------------
+// Pattern 4 — iBanking deposit
+// Example:
+//   "You have received deposit from iBanking of Tk 99.00 from Prime Bank.
+//    Fee Tk 0.00. Balance Tk 23,324.44. TrxID DF844EE7SM at 08/06/2026 21:41"
+//
+// The bank name after "from" is variable; we stop at the period.
+// No sender phone number is present in this format.
+// ---------------------------------------------------------------------------
+const IBANKING_REGEX = new RegExp(
+  `You have received deposit from iBanking of (?:Tk|BDT) ${AMOUNT} from [^.]+\\.\\s*` +
+  `Fee (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
+  `Balance (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
+  `TrxID ${TRXID} at ${DATE} ${TIME}`,
+  'i'
+);
+
+// ---------------------------------------------------------------------------
 // Main export — parseBkashSms(text)
 //
 // Tries each pattern in turn and returns a structured object on first match,
@@ -146,6 +163,24 @@ function parseBkashSms(text) {
       type: 'payment',
       amount: parseAmount(amount),
       senderNumber,
+      fee: parseAmount(fee),
+      balance: parseAmount(balance),
+      trxid: trxid.toUpperCase(),
+      bkashTimestamp: parseBkashDate(date, time),
+      rawDate: date,
+      rawTime: time,
+    };
+  }
+
+  // --- Pattern 4: iBanking deposit ---
+  match = text.match(IBANKING_REGEX);
+  if (match) {
+    // Capture groups: 1=amount 2=fee 3=balance 4=trxid 5=date 6=time
+    const [, amount, fee, balance, trxid, date, time] = match;
+    return {
+      type: 'ibanking_deposit',
+      amount: parseAmount(amount),
+      senderNumber: null,
       fee: parseAmount(fee),
       balance: parseAmount(balance),
       trxid: trxid.toUpperCase(),

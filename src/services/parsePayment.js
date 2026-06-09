@@ -22,7 +22,7 @@ const parseRocketSms = require('./rocketParser');
 function parsePayment(text) {
   // --- bKash ---
   const bkash = parseBkashSms(text);
-  if (bkash && bkash.type === 'received') {
+  if (bkash && (bkash.type === 'received' || bkash.type === 'deposit' || bkash.type === 'ibanking_deposit')) {
     return {
       platform: 'bkash',
       amount: bkash.amount,
