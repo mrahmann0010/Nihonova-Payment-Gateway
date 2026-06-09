@@ -52,6 +52,7 @@ const TIME   = '(\\d{2}:\\d{2})';
 // ---------------------------------------------------------------------------
 const RECEIVED_REGEX = new RegExp(
   `You have received Tk ${AMOUNT} from ${PHONE}\\.\\s*` +
+  `(?:Ref [^.]+\\.\\s*)?` +
   `Fee (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
   `Balance (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
   `TrxID ${TRXID} at ${DATE} ${TIME}`,
