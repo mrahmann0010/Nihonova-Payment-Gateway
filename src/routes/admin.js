@@ -15,7 +15,8 @@ const crypto  = require('crypto');
 const express = require('express');
 const router  = express.Router();
 
-const adminPage = require('../views/admin');
+const adminPage        = require('../views/admin');
+const transactionsPage = require('../views/transactions');
 
 const Bkash  = require('../models/Bkash');
 const Nagad  = require('../models/Nagad');
@@ -92,6 +93,12 @@ function searchFilter(search) {
 router.get('/', (_req, res) => {
   res.setHeader('Content-Type', 'text/html');
   res.send(adminPage());
+});
+
+// Full transaction list — filter by platform, search, paginated.
+router.get('/transactions', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(transactionsPage());
 });
 
 // ---------------------------------------------------------------------------
