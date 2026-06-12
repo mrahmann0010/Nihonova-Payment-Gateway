@@ -32,6 +32,14 @@ const BODY = `
       </div>
     </div>
 
+    <div class="panel" style="margin-bottom:26px;">
+      <div class="panel-head">
+        <h3>Revenue per day &middot; last 14 days</h3>
+        <span class="sub" id="revTotal">&mdash;</span>
+      </div>
+      <div class="canvas-box"><canvas id="revenueChart"></canvas></div>
+    </div>
+
     <div class="panel">
       <div class="panel-head">
         <h3>Recent transactions</h3>
@@ -52,7 +60,7 @@ const BODY = `
 `;
 
 const SCRIPT = `
-var trendChart = null, shareChart = null;
+var trendChart = null, shareChart = null, revenueChart = null;
 
 function renderStats(data) {
   var A = window.A, t = data.totals, by = t.byPlatform || {};
@@ -112,6 +120,31 @@ function renderCharts(data) {
       options:Object.assign({}, commonOpts, { cutout:'62%' }),
     });
   }
+
+  // Revenue per day — stacked bars per platform (amount, ৳).
+  var rev = data.revenue || { labels:d.labels, series:{}, total:[] };
+  var revData = {
+    labels: rev.labels.map(function (s) { return s.slice(5); }),
+    datasets: ['bkash','nagad','rocket'].map(function (p) {
+      return { label:p, data:rev.series[p] || [], backgroundColor:A.COLORS[p], stack:'r', borderRadius:3 };
+    }),
+  };
+  var taka = function (v) { return '৳ ' + Number(v).toLocaleString('en-US', { maximumFractionDigits:0 }); };
+  var revOpts = Object.assign({}, commonOpts, {
+    plugins: Object.assign({}, commonOpts.plugins, {
+      tooltip:{ callbacks:{ label:function (c) { return c.dataset.label + ': ' + taka(c.parsed.y); } } },
+    }),
+    scales:{
+      x:{ stacked:true, grid:{ display:false }, ticks:{ color:'#5C6A86', font:{ size:10 } } },
+      y:{ stacked:true, grid:{ color:'#18233D' }, beginAtZero:true,
+          ticks:{ color:'#5C6A86', font:{ size:10 }, callback:function (v) { return taka(v); } } },
+    },
+  });
+  if (revenueChart) { revenueChart.data = revData; revenueChart.options = revOpts; revenueChart.update(); }
+  else { revenueChart = new Chart(A.$('revenueChart'), { type:'bar', data:revData, options:revOpts }); }
+
+  var revSum = (rev.total || []).reduce(function (a, b) { return a + b; }, 0);
+  A.$('revTotal').textContent = taka(revSum) + ' in 14 days';
 }
 
 function loadRecent() {

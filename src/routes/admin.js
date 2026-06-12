@@ -182,15 +182,17 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
               $group: {
                 _id: { $dateToString: { format: '%Y-%m-%d', date: '$dateReceived', timezone: BD_TZ } },
                 count: { $sum: 1 },
+                amount: { $sum: '$amount' },
               },
             },
           ]),
         ]);
 
         const totals = totalsAgg[0] || { count: 0, amount: 0 };
-        const dailyMap = {};
-        for (const d of dailyAgg) dailyMap[d._id] = d.count;
-        return { name, count: totals.count, amount: totals.amount, dailyMap };
+        const countMap = {};
+        const amountMap = {};
+        for (const d of dailyAgg) { countMap[d._id] = d.count; amountMap[d._id] = d.amount; }
+        return { name, count: totals.count, amount: totals.amount, countMap, amountMap };
       })
     );
 
@@ -204,15 +206,26 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
     }
 
     const totals = { count: 0, amount: 0, byPlatform: {} };
-    const series = {};
+    const series = {};          // daily payment counts, per platform
+    const revenueSeries = {};   // daily revenue (amount), per platform
     for (const p of perPlatform) {
       totals.count += p.count;
       totals.amount += p.amount;
       totals.byPlatform[p.name] = { count: p.count, amount: p.amount };
-      series[p.name] = labels.map((day) => p.dailyMap[day] || 0);
+      series[p.name] = labels.map((day) => p.countMap[day] || 0);
+      revenueSeries[p.name] = labels.map((day) => p.amountMap[day] || 0);
     }
 
-    res.json({ totals, daily: { labels, series } });
+    // Combined revenue across all platforms, per day.
+    const revenueTotal = labels.map((_, i) =>
+      Object.values(revenueSeries).reduce((sum, arr) => sum + arr[i], 0)
+    );
+
+    res.json({
+      totals,
+      daily: { labels, series },
+      revenue: { labels, series: revenueSeries, total: revenueTotal },
+    });
   } catch (err) {
     next(err);
   }
