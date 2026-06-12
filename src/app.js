@@ -4,6 +4,7 @@ const express        = require('express');
 const connectDB      = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
+const adminRouter    = require('./routes/admin');
 const homePage       = require('./views/home');
 
 if (!process.env.MONGO_URI) {
@@ -41,6 +42,8 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+app.use('/admin', adminRouter);
 
 app.use('/webhooks', verifySignature, webhookRouter);
 

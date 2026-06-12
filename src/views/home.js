@@ -69,6 +69,8 @@ module.exports = () => `<!DOCTYPE html>
     color: var(--text-dim); border: 1px solid var(--border);
     border-radius: 999px; padding: 4px 11px;
   }
+  a.tag-link { text-decoration: none; transition: color 0.2s, border-color 0.2s; }
+  a.tag-link:hover { color: var(--text); border-color: var(--accent); }
 
   /* hero */
   .hero { padding: 58px 0 36px; }
@@ -239,7 +241,7 @@ module.exports = () => `<!DOCTYPE html>
       <div class="mark">&#8250;_</div>
       <div class="name">sms-webhook<span> /v1</span></div>
     </div>
-    <div class="tag">production</div>
+    <a class="tag tag-link" href="/admin">Transactions &#8250;</a>
   </div>
 </header>
 
