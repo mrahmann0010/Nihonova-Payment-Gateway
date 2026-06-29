@@ -1,11 +1,11 @@
 require('dotenv').config();
 
+const path           = require('path');
 const express        = require('express');
 const connectDB      = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
 const adminRouter    = require('./routes/admin');
-const homePage       = require('./views/home');
 
 if (!process.env.MONGO_URI) {
   console.error('[Config] MONGO_URI is not set. Server cannot start without a database connection.');
@@ -13,6 +13,11 @@ if (!process.env.MONGO_URI) {
 }
 
 const app = express();
+
+// EJS server-rendered views + static assets (CSS).
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
 
 app.use(
   express.json({
@@ -36,10 +41,7 @@ app.use(async (req, res, next) => {
 
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
 
-app.get('/', (_req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.send(homePage());
-});
+app.get('/', (_req, res) => res.render('home'));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 

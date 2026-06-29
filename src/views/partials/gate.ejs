@@ -1,0 +1,15 @@
+<%# Token gate. Its own x-data root so x-show / x-cloak are processed by Alpine. %>
+<section class="gate" x-data="{ token: '' }" x-show="!$store.auth.authed" x-cloak>
+  <h2>Admin access</h2>
+  <p>Enter the admin token to view payment records and analytics.</p>
+  <div class="field">
+    <input type="password" placeholder="ADMIN_TOKEN" autocomplete="off"
+           x-model="token"
+           @keydown.enter="$store.auth.verify(token)" />
+    <button class="btn"
+            :disabled="$store.auth.checking"
+            @click="$store.auth.verify(token)"
+            x-text="$store.auth.checking ? 'Checking…' : 'Enter'">Enter</button>
+  </div>
+  <div class="gate-err" x-text="$store.auth.error"></div>
+</section>

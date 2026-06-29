@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('partials/head', {
+  title: 'Payment SMS Webhook',
+  css: '/css/home.css',
+  description: 'Receives bKash, Nagad, and Rocket payment SMS, parses them, and stores clean records in MongoDB.',
+}) %>
+</head>
+<body>
+
+<%- include('partials/header', {
+  subtitle: 'v1',
+  headerRight: '<a class="tag tag-link" href="/admin">Transactions &#8250;</a>',
+}) %>
+
+<main class="wrap">
+
+  <section class="hero">
+    <div class="eyebrow">Payment SMS Webhook</div>
+    <h1>Payment SMS in,<br><span class="soft">clean records out.</span></h1>
+    <p class="lede">Receives bKash, Nagad, and Rocket notifications forwarded from an Android phone, parses each message, and writes a structured payment record to MongoDB.</p>
+  </section>
+
+  <section class="status" x-data="healthStatus" x-init="check()" :class="cls" aria-live="polite">
+    <div class="status-top">
+      <div class="status-id">
+        <span class="pulse"></span>
+        <div class="status-label">
+          <div class="k">Service status</div>
+          <div class="v" x-text="state">Checking&hellip;</div>
+        </div>
+      </div>
+      <button class="recheck" type="button" :disabled="busy" @click="check()">Re-check</button>
+    </div>
+    <div class="status-meta">
+      <div class="metric"><div class="mk">Endpoint</div><div class="mv">GET /health</div></div>
+      <div class="metric"><div class="mk">Latency</div><div class="mv" x-text="latency">&mdash;</div></div>
+    </div>
+    <div class="status-note" :class="{ err: noteErr }" x-text="note">Probing the server&hellip;</div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">Supported platforms</div>
+    <div class="platforms">
+      <div class="plat"><div class="pname">bKash</div><div class="pmeta">4 formats</div></div>
+      <div class="plat"><div class="pname">Nagad</div><div class="pmeta">money received</div></div>
+      <div class="plat"><div class="pname">Rocket</div><div class="pmeta">DBBL &middot; A/C</div></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">Endpoints</div>
+    <div class="ep">
+      <div class="ep-row">
+        <span class="verb get">GET</span>
+        <span class="path">/health</span>
+        <span class="ep-desc">Liveness probe</span>
+      </div>
+      <div class="ep-row">
+        <span class="verb post">POST</span>
+        <span class="path">/webhooks/sms</span>
+        <span class="ep-desc">Receives forwarded SMS &middot; token required</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="section-head">Webhook payload</div>
+    <div class="code-block">
+      <div class="cb-head">
+        <span class="verb post">POST</span>
+        <span class="cb-title">Request body &middot; JSON</span>
+      </div>
+<pre class="code">{
+  <span class="k">"from"</span>: <span class="s">"bKash"</span>,
+  <span class="k">"text"</span>: <span class="s">"You have received Tk 500.00 from 01712345678 ... TrxID AB1234CDEF at 08/06/2026 14:32"</span>,
+  <span class="k">"sim"</span>: <span class="s">"1"</span>,
+  <span class="k">"sentStamp"</span>: <span class="n">1749383520000</span>,
+  <span class="k">"receivedStamp"</span>: <span class="n">1749383521000</span>
+}</pre>
+    </div>
+    <div class="code-block">
+      <div class="cb-head">
+        <span class="cb-title">Response &middot; always HTTP 200</span>
+      </div>
+<pre class="code">{
+  <span class="k">"received"</span>: <span class="n">true</span>,
+  <span class="k">"processed"</span>: <span class="n">true</span>,
+  <span class="k">"platform"</span>: <span class="s">"bkash"</span>,
+  <span class="k">"trxId"</span>: <span class="s">"AB1234CDEF"</span>
+}</pre>
+    </div>
+    <div class="legend">
+      <div class="lg"><code>processed: true</code><span>Payment saved</span></div>
+      <div class="lg"><code>unmatched</code><span>No known SMS pattern matched</span></div>
+      <div class="lg"><code>duplicate</code><span>trxId already stored &mdash; delivery retried</span></div>
+    </div>
+    <p class="auth-note">Authenticate by appending <code>?token=&lt;WEBHOOK_SECRET&gt;</code> to the URL. Missing or invalid tokens are rejected with <code>401</code>.</p>
+  </section>
+
+  <section class="section">
+    <div class="section-head">How it works</div>
+    <div class="flow">
+      <div class="step"><span class="no">01</span><span class="txt">A phone receives a payment SMS from <b>bKash, Nagad, or Rocket</b>.</span></div>
+      <div class="step"><span class="no">02</span><span class="txt">The forwarder app <b>POSTs the raw text</b> to <code>/webhooks/sms</code>.</span></div>
+      <div class="step"><span class="no">03</span><span class="txt">The server detects the platform and <b>parses it into structured fields</b>.</span></div>
+      <div class="step"><span class="no">04</span><span class="txt">The record is <b>written to MongoDB</b>; duplicate deliveries are dropped by trxId.</span></div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>Express</span><span class="dot">&middot;</span>
+    <span>EJS</span><span class="dot">&middot;</span>
+    <span>MongoDB</span><span class="dot">&middot;</span>
+    <span>deployed on Vercel</span>
+  </div>
+</footer>
+
+<script>
+  document.addEventListener('alpine:init', function () {
+    Alpine.data('healthStatus', function () {
+      return {
+        cls: 's-checking', state: 'Checking…', latency: '—',
+        note: 'Probing the server…', noteErr: false, busy: false,
+        clock: function () {
+          return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        },
+        check: function () {
+          var self = this;
+          self.cls = 's-checking'; self.state = 'Checking…'; self.latency = '—';
+          self.noteErr = false; self.note = 'Probing the server…'; self.busy = true;
+          var t0 = performance.now();
+          return fetch('/health', { cache: 'no-store' })
+            .then(function (res) {
+              var ms = Math.round(performance.now() - t0);
+              self.latency = ms + ' ms';
+              return res.json().catch(function () { return {}; }).then(function (data) {
+                if (res.ok && data && data.status === 'ok') {
+                  self.cls = 's-ok'; self.state = 'Operational';
+                  self.note = 'All systems normal · checked ' + self.clock();
+                } else {
+                  self.cls = 's-warn'; self.state = 'Degraded';
+                  self.note = 'Server responded with HTTP ' + res.status + ' · checked ' + self.clock();
+                }
+              });
+            })
+            .catch(function () {
+              self.cls = 's-down'; self.state = 'Unreachable'; self.latency = '—';
+              self.noteErr = true; self.note = "Can’t reach /health — is the server running?";
+            })
+            .finally(function () { self.busy = false; });
+        },
+      };
+    });
+  });
+</script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js" defer></script>
+
+</body>
+</html>
