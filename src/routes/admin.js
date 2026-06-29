@@ -15,8 +15,7 @@ const crypto  = require('crypto');
 const express = require('express');
 const router  = express.Router();
 
-const adminPage        = require('../views/admin');
-const transactionsPage = require('../views/transactions');
+const h = require('../views/helpers');
 
 const Bkash  = require('../models/Bkash');
 const Nagad  = require('../models/Nagad');
@@ -87,18 +86,86 @@ function searchFilter(search) {
   return { $or: [{ trxId: rx }, { sender: rx }] };
 }
 
+// Fetch a paginated, filterable page of payments across one or all platforms.
+// Shared by the JSON API and the htmx partial so both stay in lock-step.
+async function fetchPayments({ platform, page, limit, search }) {
+  const query = searchFilter(search);
+
+  // Single platform — page directly in the database.
+  if (platform !== 'all') {
+    const Model = MODELS[platform];
+    if (!Model) { const e = new Error('Unknown platform'); e.status = 400; throw e; }
+
+    const [docs, total] = await Promise.all([
+      Model.find(query).sort({ dateReceived: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      Model.countDocuments(query),
+    ]);
+    return { payments: docs.map((d) => serialize(d, platform)), total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
+  }
+
+  // All platforms — fetch the top (page*limit) from each collection, merge,
+  // sort by time, then slice the requested page.
+  const windowSize = page * limit;
+  const results = await Promise.all(
+    Object.entries(MODELS).map(async ([name, Model]) => {
+      const [docs, count] = await Promise.all([
+        Model.find(query).sort({ dateReceived: -1 }).limit(windowSize).lean(),
+        Model.countDocuments(query),
+      ]);
+      return { name, docs, count };
+    })
+  );
+
+  let total = 0;
+  const merged = [];
+  for (const r of results) {
+    total += r.count;
+    for (const d of r.docs) merged.push(serialize(d, r.name));
+  }
+  merged.sort((a, b) => new Date(b.dateReceived) - new Date(a.dateReceived));
+  const payments = merged.slice((page - 1) * limit, (page - 1) * limit + limit);
+  return { payments, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
+}
+
+// Normalise the list query params shared by the API + partial routes.
+function listParams(req) {
+  return {
+    platform: String(req.query.platform || 'all').toLowerCase(),
+    page:  Math.max(1, parseInt(req.query.page, 10) || 1),
+    limit: Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25)),
+    search: (req.query.search || '').trim(),
+  };
+}
+
 // ---------------------------------------------------------------------------
-// Dashboard page (HTML shell — carries no data, so it stays public).
+// Pages (EJS shells — carry no data, so they stay public; data needs a token).
 // ---------------------------------------------------------------------------
-router.get('/', (_req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.send(adminPage());
+router.get('/', (_req, res) => res.render('admin'));
+router.get('/transactions', (_req, res) => res.render('transactions'));
+
+// ---------------------------------------------------------------------------
+// htmx partials — server-rendered HTML fragments (token required).
+// ---------------------------------------------------------------------------
+
+// Latest transaction highlight + the preceding rows (limit 6 → 1 latest + 5).
+router.get('/partials/recent', requireAdmin, async (_req, res, next) => {
+  try {
+    const { payments } = await fetchPayments({ platform: 'all', page: 1, limit: 6, search: '' });
+    res.render('partials/recent', { payments, h });
+  } catch (err) { next(err); }
 });
 
-// Full transaction list — filter by platform, search, paginated.
-router.get('/transactions', (_req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.send(transactionsPage());
+// Transactions table body + pager.
+router.get('/partials/transactions', requireAdmin, async (req, res, next) => {
+  try {
+    const params = listParams(req);
+    if (req.query.limit == null) params.limit = 20;
+    const data = await fetchPayments(params);
+    res.render('partials/transactions-table', { ...data, platform: params.platform, search: params.search, h });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).send('<div class="empty">Unknown platform.</div>');
+    next(err);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -107,55 +174,10 @@ router.get('/transactions', (_req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/api/payments', requireAdmin, async (req, res, next) => {
   try {
-    const platform = String(req.query.platform || 'all').toLowerCase();
-    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
-    const query = searchFilter((req.query.search || '').trim());
-
-    // Single platform — page directly in the database.
-    if (platform !== 'all') {
-      const Model = MODELS[platform];
-      if (!Model) return res.status(400).json({ error: 'Unknown platform' });
-
-      const [docs, total] = await Promise.all([
-        Model.find(query).sort({ dateReceived: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-        Model.countDocuments(query),
-      ]);
-
-      return res.json({
-        payments: docs.map((d) => serialize(d, platform)),
-        total, page, limit, pages: Math.max(1, Math.ceil(total / limit)),
-      });
-    }
-
-    // All platforms — fetch the top (page*limit) from each collection, merge,
-    // sort by time, then slice the requested page. Correct for the modest
-    // volumes this dashboard targets without a cross-collection index.
-    const window = page * limit;
-    const results = await Promise.all(
-      Object.entries(MODELS).map(async ([name, Model]) => {
-        const [docs, count] = await Promise.all([
-          Model.find(query).sort({ dateReceived: -1 }).limit(window).lean(),
-          Model.countDocuments(query),
-        ]);
-        return { name, docs, count };
-      })
-    );
-
-    let total = 0;
-    const merged = [];
-    for (const r of results) {
-      total += r.count;
-      for (const d of r.docs) merged.push(serialize(d, r.name));
-    }
-    merged.sort((a, b) => new Date(b.dateReceived) - new Date(a.dateReceived));
-    const pageItems = merged.slice((page - 1) * limit, (page - 1) * limit + limit);
-
-    res.json({
-      payments: pageItems,
-      total, page, limit, pages: Math.max(1, Math.ceil(total / limit)),
-    });
+    const data = await fetchPayments(listParams(req));
+    res.json(data);
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     next(err);
   }
 });
