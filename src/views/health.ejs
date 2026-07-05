@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('partials/head', { title: 'Admin · Health', css: '/css/admin.css', noindex: true }) %>
+</head>
+<body>
+
+<%- include('partials/header', { subtitle: 'admin', headerRight: '<a class="tag" href="/">&larr; Home</a>' }) %>
+<%- include('partials/admin-nav', { active: 'health' }) %>
+
+<main class="wrap">
+
+  <%- include('partials/gate') %>
+
+  <section class="app" x-show="$store.auth.authed" x-cloak>
+    <div class="page-head">
+      <div>
+        <h1>Pipeline health</h1>
+        <div class="sub">Is every SMS actually making it into the database?</div>
+      </div>
+      <div class="head-actions">
+        <button class="btn ghost" @click="$store.auth.refresh(); $dispatch('refresh-health')">Refresh</button>
+        <button class="btn ghost" @click="$store.auth.logout()">Sign out</button>
+      </div>
+    </div>
+
+    <div id="health-wrap"
+         hx-get="/admin/partials/health"
+         hx-trigger="auth-ready from:body, refresh-health from:body"
+         hx-target="this" hx-swap="innerHTML">
+      <div class="loading">Loading…</div>
+    </div>
+  </section>
+
+</main>
+
+<%- include('partials/scripts', { withChartJs: false }) %>
+
+</body>
+</html>

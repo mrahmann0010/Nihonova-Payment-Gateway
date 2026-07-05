@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('partials/head', { title: 'Admin · Reports', css: '/css/admin.css', noindex: true }) %>
+</head>
+<body>
+
+<%- include('partials/header', { subtitle: 'admin', headerRight: '<a class="tag" href="/">&larr; Home</a>' }) %>
+<%- include('partials/admin-nav', { active: 'reports' }) %>
+
+<main class="wrap">
+
+  <%- include('partials/gate') %>
+
+  <section class="app" x-data="reports" x-show="$store.auth.authed" x-cloak>
+    <div class="page-head">
+      <div>
+        <h1>Reports</h1>
+        <div class="sub">Custom date range &middot; totals, fees, and top senders.</div>
+      </div>
+      <div class="head-actions">
+        <button class="btn ghost" @click="$store.auth.logout()">Sign out</button>
+      </div>
+    </div>
+
+    <form class="toolbar" @submit.prevent="load()">
+      <div class="seg">
+        <button type="button" @click="setPreset(7)">Last 7 days</button>
+        <button type="button" @click="setPreset(30)">Last 30 days</button>
+        <button type="button" @click="setPreset(90)">Last 90 days</button>
+      </div>
+      <input type="date" x-model="from" />
+      <span class="dim">&rarr;</span>
+      <input type="date" x-model="to" />
+      <button type="submit" class="btn">Apply</button>
+    </form>
+
+    <template x-if="data">
+      <div>
+        <div class="section-lbl">Totals &middot; <span x-text="from"></span> to <span x-text="to"></span></div>
+        <div class="stats">
+          <div class="stat">
+            <div class="lbl">All payments</div>
+            <div class="num" x-text="window.fmt.count(data.totals.count)"></div>
+            <div class="amt" x-text="'৳ ' + window.fmt.amount(data.totals.amount)"></div>
+          </div>
+          <template x-for="p in ['bkash','nagad','rocket']" :key="p">
+            <div class="stat" :class="p">
+              <div class="lbl"><span class="dot" :class="p"></span><span x-text="p === 'bkash' ? 'bKash' : (p[0].toUpperCase() + p.slice(1))"></span></div>
+              <div class="num" x-text="window.fmt.count((data.totals.byPlatform[p] || {count:0}).count)"></div>
+              <div class="amt" x-text="'৳ ' + window.fmt.amount((data.totals.byPlatform[p] || {amount:0}).amount)"></div>
+            </div>
+          </template>
+        </div>
+
+        <div class="panel" style="margin-bottom:26px;">
+          <div class="panel-head">
+            <h3>Revenue per day</h3>
+            <span class="sub" x-text="'Fees: ৳ ' + window.fmt.amount(data.totals.fee)"></span>
+          </div>
+          <div class="canvas-box"><canvas x-ref="trend"></canvas></div>
+        </div>
+
+        <div class="section-lbl">Top senders</div>
+        <div class="table-wrap">
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Sender</th><th>Transactions</th><th>Amount</th><th></th></tr></thead>
+              <tbody>
+                <template x-if="!data.topSenders.length">
+                  <tr><td colspan="4" class="empty">No transactions in this range.</td></tr>
+                </template>
+                <template x-for="s in data.topSenders" :key="s.sender">
+                  <tr>
+                    <td class="mono"><span x-text="s.sender"></span></td>
+                    <td class="mono" x-text="window.fmt.count(s.count)"></td>
+                    <td class="amt-cell" x-text="'৳ ' + window.fmt.amount(s.amount)"></td>
+                    <td><a class="btn ghost" :href="'/admin/transactions?search=' + encodeURIComponent(s.sender)">View &rsaquo;</a></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </template>
+  </section>
+
+</main>
+
+<script>
+  document.addEventListener('alpine:init', function () {
+    Alpine.data('reports', function () {
+      return {
+        from: '', to: '',
+        data: null,
+        chart: null,
+
+        init: function () {
+          var self = this;
+          document.body.addEventListener('auth-ready', function () { self.load(); });
+        },
+
+        setPreset: function (days) {
+          var to = new Date(), from = new Date();
+          from.setDate(from.getDate() - (days - 1));
+          this.to = to.toISOString().slice(0, 10);
+          this.from = from.toISOString().slice(0, 10);
+          this.load();
+        },
+
+        load: function () {
+          var self = this;
+          var qs = (this.from && this.to) ? ('?from=' + this.from + '&to=' + this.to) : '';
+          fetch('/admin/api/reports' + qs, { headers: { 'x-admin-token': this.$store.auth.token } })
+            .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(function (d) {
+              self.data = d;
+              self.from = d.from;
+              self.to = d.to;
+              self.$nextTick(function () { self.renderChart(d); });
+            })
+            .catch(function () {});
+        },
+
+        renderChart: function (d) {
+          var self = this;
+          if (typeof Chart === 'undefined') { setTimeout(function () { self.renderChart(d); }, 150); return; }
+          var C = { bkash: '#E2136E', nagad: '#F6921E', rocket: '#8A2BE2' };
+          var taka = function (v) { return '৳ ' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 }); };
+          var chartData = {
+            labels: d.daily.labels.map(function (s) { return s.slice(5); }),
+            datasets: ['bkash', 'nagad', 'rocket'].map(function (p) {
+              return { label: p, data: d.daily.series[p] || [], backgroundColor: C[p], stack: 'r', borderRadius: 3 };
+            }),
+          };
+          var opts = {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { labels: { color: '#94A2BE', font: { size: 11 }, usePointStyle: true, boxWidth: 7 } },
+              tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + taka(c.parsed.y); } } },
+            },
+            scales: {
+              x: { stacked: true, grid: { display: false }, ticks: { color: '#5C6A86', font: { size: 10 } } },
+              y: { stacked: true, grid: { color: '#18233D' }, beginAtZero: true,
+                   ticks: { color: '#5C6A86', font: { size: 10 }, callback: function (v) { return taka(v); } } },
+            },
+          };
+          if (this.chart) { this.chart.data = chartData; this.chart.options = opts; this.chart.update(); }
+          else { this.chart = new Chart(this.$refs.trend, { type: 'bar', data: chartData, options: opts }); }
+        },
+      };
+    });
+  });
+</script>
+<%- include('partials/scripts', { withChartJs: true }) %>
+
+</body>
+</html>

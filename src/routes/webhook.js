@@ -19,9 +19,10 @@ const express      = require('express');
 const router       = express.Router();
 const parsePayment = require('../services/parsePayment');
 
-const Bkash  = require('../models/Bkash');
-const Nagad  = require('../models/Nagad');
-const Rocket = require('../models/Rocket');
+const Bkash        = require('../models/Bkash');
+const Nagad        = require('../models/Nagad');
+const Rocket       = require('../models/Rocket');
+const WebhookEvent = require('../models/WebhookEvent');
 
 // Maps a parsed platform name to its Mongoose model.
 const MODELS = {
@@ -29,6 +30,14 @@ const MODELS = {
   nagad:  Nagad,
   rocket: Rocket,
 };
+
+// Fire-and-forget ingestion-health log — must never throw or delay the
+// webhook response, so a logging hiccup can't turn into a dropped payment.
+function logEvent(reason, fields) {
+  WebhookEvent.create({ reason, ...fields }).catch((err) => {
+    console.error('[Webhook] Failed to record ingestion event:', err.message);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // POST /webhooks/sms
@@ -50,6 +59,7 @@ router.post('/sms', async (req, res) => {
   const senderLower = (sender || '').toLowerCase();
   if (knownSenders.length > 0 && !knownSenders.includes(senderLower)) {
     console.log(`[Webhook] Ignored unknown sender: "${sender}"`);
+    logEvent('unknown_sender', { sender });
     return res.status(200).json({ received: true, processed: false });
   }
 
@@ -58,6 +68,7 @@ router.post('/sms', async (req, res) => {
 
   if (!parsed) {
     console.warn(`[Webhook] Unmatched SMS from "${sender}" — not stored (no known payment pattern)`);
+    logEvent('unmatched', { sender, rawMessage: (text || '').slice(0, 300) });
     return res.status(200).json({ received: true, processed: false, reason: 'unmatched' });
   }
 
@@ -101,10 +112,12 @@ router.post('/sms', async (req, res) => {
     // Return 200 so the gateway stops retrying.
     if (err.code === 11000) {
       console.log(`[Webhook] Duplicate trxId ignored — ${parsed.platform}/${parsed.trxId}`);
+      logEvent('duplicate', { platform: parsed.platform, sender: parsed.sender || sender });
       return res.status(200).json({ received: true, processed: false, reason: 'duplicate' });
     }
 
     console.error('[Webhook] Unexpected error:', err.message);
+    logEvent('error', { platform: parsed.platform, sender: parsed.sender || sender, error: err.message });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
