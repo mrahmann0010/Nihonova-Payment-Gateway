@@ -1,0 +1,60 @@
+<%# Ingestion health content, rendered into #health-wrap. %>
+<div class="section-lbl">Freshness &middot; last received per platform</div>
+<div class="stats">
+  <% freshness.forEach(function (f) {
+       var status = f.hoursSince == null ? 'down' : f.hoursSince < 2 ? 'ok' : f.hoursSince < 6 ? 'warn' : 'down';
+       var label = f.name === 'bkash' ? 'bKash' : f.name[0].toUpperCase() + f.name.slice(1);
+  %>
+    <div class="stat <%= f.name %>">
+      <div class="lbl"><span class="dot <%= f.name %>"></span><%= label %></div>
+      <div class="num status-<%= status %>"><%= f.lastReceivedAt ? h.fmtAgo(f.lastReceivedAt) : 'Never' %></div>
+      <div class="amt"><%= f.lastReceivedAt ? h.fmtDateTime(f.lastReceivedAt) : 'No transactions recorded' %></div>
+    </div>
+  <% }); %>
+</div>
+
+<div class="section-lbl">Ingestion events</div>
+<div class="charts">
+  <div class="panel">
+    <h3>Last 24 hours</h3>
+    <table class="kv">
+      <tr><td>Unmatched (no pattern matched)</td><td class="mono"><%= counts24h.unmatched %></td></tr>
+      <tr><td>Duplicate (already stored)</td><td class="mono"><%= counts24h.duplicate %></td></tr>
+      <tr><td>Unknown sender</td><td class="mono"><%= counts24h.unknown_sender %></td></tr>
+      <tr><td>Errors</td><td class="mono"><%= counts24h.error %></td></tr>
+    </table>
+  </div>
+  <div class="panel">
+    <h3>Last 7 days</h3>
+    <table class="kv">
+      <tr><td>Unmatched</td><td class="mono"><%= counts7d.unmatched %></td></tr>
+      <tr><td>Duplicate</td><td class="mono"><%= counts7d.duplicate %></td></tr>
+      <tr><td>Unknown sender</td><td class="mono"><%= counts7d.unknown_sender %></td></tr>
+      <tr><td>Errors</td><td class="mono"><%= counts7d.error %></td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="section-lbl">Recent events</div>
+<div class="table-wrap">
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Reason</th><th>Platform</th><th>Sender</th><th>Detail</th><th>Time</th></tr>
+      </thead>
+      <tbody>
+        <% if (!recentEvents.length) { %>
+          <tr><td colspan="5" class="empty">No ingestion issues recorded — pipeline's been clean.</td></tr>
+        <% } else { recentEvents.forEach(function (e) { %>
+          <tr>
+            <td><span class="pill reason-<%= e.reason %>"><%= e.reason.replace('_', ' ') %></span></td>
+            <td class="mono dim"><%= e.platform || '—' %></td>
+            <td class="mono"><%= e.sender || '—' %></td>
+            <td class="mono dim"><%= (e.error || e.rawMessage || '—').slice(0, 60) %></td>
+            <td class="mono dim"><%= h.fmtDateTime(e.createdAt) %></td>
+          </tr>
+        <% }); } %>
+      </tbody>
+    </table>
+  </div>
+</div>

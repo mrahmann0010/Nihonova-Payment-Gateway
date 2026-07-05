@@ -6,6 +6,7 @@
 <body>
 
 <%- include('partials/header', { subtitle: 'admin', headerRight: '<a class="tag" href="/">&larr; Home</a>' }) %>
+<%- include('partials/admin-nav', { active: 'dashboard' }) %>
 
 <main class="wrap">
 
@@ -23,6 +24,38 @@
       </div>
     </div>
 
+    <div class="panel featured" x-data="{ showRecent: false }" style="margin-bottom:26px;">
+      <div class="panel-head">
+        <h3>Latest transaction</h3>
+        <a class="btn ghost" href="/admin/transactions">See all &rsaquo;</a>
+      </div>
+
+      <div hx-get="/admin/partials/recent"
+           hx-trigger="auth-ready from:body, refresh-recent from:body"
+           hx-target="this" hx-swap="innerHTML">
+        <div class="loading">Loading…</div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <button class="btn ghost" @click="showRecent = !showRecent"
+                x-text="showRecent ? 'Hide last 5 ›' : 'Show last 5 ›'">Show last 5 &rsaquo;</button>
+      </div>
+    </div>
+
+    <div class="section-lbl">Overview</div>
+    <div class="overview">
+      <template x-for="c in overviewCards()" :key="c.label">
+        <div class="stat">
+          <div class="lbl"><span x-text="c.label"></span></div>
+          <div class="num" x-text="window.fmt.count(c.count)"></div>
+          <div class="amt" x-text="'৳ ' + window.fmt.amount(c.amount)"></div>
+          <div class="delta" :class="c.delta && c.delta.cls" x-show="c.delta"
+               x-text="c.delta && (c.delta.arrow + ' ' + c.delta.pct + '% vs ' + c.delta.label)"></div>
+        </div>
+      </template>
+    </div>
+
+    <div class="section-lbl">All-time</div>
     <div class="stats">
       <template x-for="c in cards()" :key="c.label">
         <div class="stat" :class="c.cls">
@@ -36,6 +69,7 @@
       </template>
     </div>
 
+    <div class="section-lbl">Trend &middot; last 14 days</div>
     <div class="charts">
       <div class="panel">
         <h3>Payments per day &middot; last 14 days</h3>
@@ -55,22 +89,9 @@
       <div class="canvas-box"><canvas x-ref="revenue"></canvas></div>
     </div>
 
-    <div class="panel" x-data="{ showRecent: false }">
-      <div class="panel-head">
-        <h3>Latest transaction</h3>
-        <a class="btn ghost" href="/admin/transactions">See all &rsaquo;</a>
-      </div>
-
-      <div hx-get="/admin/partials/recent"
-           hx-trigger="auth-ready from:body, refresh-recent from:body"
-           hx-target="this" hx-swap="innerHTML">
-        <div class="loading">Loading…</div>
-      </div>
-
-      <div style="margin-top:14px;">
-        <button class="btn ghost" @click="showRecent = !showRecent"
-                x-text="showRecent ? 'Hide last 5 ›' : 'Show last 5 ›'">Show last 5 &rsaquo;</button>
-      </div>
+    <div class="panel" style="margin-bottom:26px;">
+      <h3>Peak hours &middot; last 30 days</h3>
+      <div class="canvas-box"><canvas x-ref="peakHours"></canvas></div>
     </div>
   </section>
 
@@ -82,7 +103,7 @@
       return {
         updated: '—',
         revTotal: '—',
-        charts: { trend: null, share: null, revenue: null },
+        charts: { trend: null, share: null, revenue: null, peakHours: null },
         COLORS: { bkash: '#E2136E', nagad: '#F6921E', rocket: '#8A2BE2' },
 
         init: function () {
@@ -104,6 +125,24 @@
           ];
         },
 
+        delta: function (curr, prev, label) {
+          if (!prev) return null;
+          var pct = Math.round(((curr - prev) / prev) * 100);
+          return { pct: Math.abs(pct), cls: pct >= 0 ? 'up' : 'down', arrow: pct >= 0 ? '▲' : '▼', label: label };
+        },
+
+        overviewCards: function () {
+          var s = this.$store.auth.stats;
+          if (!s || !s.periods) return [];
+          var p = s.periods;
+          return [
+            { label: 'Today',        count: p.today.count,     amount: p.today.amount,     delta: this.delta(p.today.amount, p.yesterday.amount, 'yesterday') },
+            { label: 'Yesterday',    count: p.yesterday.count, amount: p.yesterday.amount,  delta: null },
+            { label: 'Last 7 days',  count: p.last7.count,     amount: p.last7.amount,      delta: this.delta(p.last7.amount, p.prev7.amount, 'prior 7d') },
+            { label: 'This month',   count: p.month.count,     amount: p.month.amount,      delta: this.delta(p.month.amount, p.prevMonthSame.amount, 'last month') },
+          ];
+        },
+
         render: function (data) {
           this.updated = 'Updated ' + new Date().toLocaleTimeString();
           this.renderCharts(data);
@@ -112,7 +151,7 @@
         renderCharts: function (data) {
           var self = this;
           if (typeof Chart === 'undefined') { setTimeout(function () { self.renderCharts(data); }, 150); return; }
-          var d = data.daily, t = data.totals.byPlatform || {}, C = this.COLORS;
+          var d = data.daily, t = data.totals.byPlatform || {}, C = this.COLORS, C_ACCENT = '#4F7BFF';
           var commonOpts = {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { labels: { color: '#94A2BE', font: { size: 11 }, usePointStyle: true, boxWidth: 7 } } },
@@ -173,6 +212,21 @@
 
           var revSum = (rev.total || []).reduce(function (a, b) { return a + b; }, 0);
           this.revTotal = taka(revSum) + ' in 14 days';
+
+          var peak = data.peakHours || { labels: [], counts: [] };
+          var peakData = {
+            labels: peak.labels.map(function (h) { return h + ':00'; }),
+            datasets: [{ data: peak.counts, backgroundColor: C_ACCENT, borderRadius: 3 }],
+          };
+          var peakOpts = Object.assign({}, commonOpts, {
+            plugins: Object.assign({}, commonOpts.plugins, { legend: { display: false } }),
+            scales: {
+              x: { grid: { display: false }, ticks: { color: '#5C6A86', font: { size: 10 } } },
+              y: { grid: { color: '#18233D' }, ticks: { color: '#5C6A86', precision: 0, font: { size: 10 } }, beginAtZero: true },
+            },
+          });
+          if (this.charts.peakHours) { this.charts.peakHours.data = peakData; this.charts.peakHours.update(); }
+          else { this.charts.peakHours = new Chart(this.$refs.peakHours, { type: 'bar', data: peakData, options: peakOpts }); }
         },
       };
     });

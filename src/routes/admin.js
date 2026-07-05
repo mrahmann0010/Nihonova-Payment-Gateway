@@ -3,7 +3,9 @@
 // Routes (all under /admin):
 //   GET /admin                 → dashboard HTML (public shell; data needs token)
 //   GET /admin/api/payments    → paginated, filterable transaction list (token)
-//   GET /admin/api/stats       → totals + 14-day daily counts for charts (token)
+//   GET /admin/api/stats       → totals, 14-day daily/revenue series, period
+//                                 comparisons (today/yesterday/7d/month), and
+//                                 a 30-day peak-hours histogram (token)
 //
 // Auth: every /api/* route requires the admin token, supplied as either
 //   ?token=<ADMIN_TOKEN>  or  Authorization: Bearer <ADMIN_TOKEN>  or
@@ -17,15 +19,41 @@ const router  = express.Router();
 
 const h = require('../views/helpers');
 
-const Bkash  = require('../models/Bkash');
-const Nagad  = require('../models/Nagad');
-const Rocket = require('../models/Rocket');
+const Bkash        = require('../models/Bkash');
+const Nagad        = require('../models/Nagad');
+const Rocket       = require('../models/Rocket');
+const WebhookEvent = require('../models/WebhookEvent');
 
 const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
 
 // Bangladesh local time — dates are stored in UTC, so we shift grouping back
 // to +06:00 to keep "per day" buckets aligned with the local calendar.
 const BD_TZ = '+06:00';
+const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+
+// A Date whose UTC fields equal the current BD wall-clock fields (handy for
+// reading BD calendar year/month/date with plain UTC getters).
+function bdNow() {
+  return new Date(Date.now() + BD_OFFSET_MS);
+}
+
+// BD calendar month start (`monthOffset` months from `bdWallClock`'s month),
+// returned as the actual UTC instant that BD midnight corresponds to.
+function bdMonthStartUTC(bdWallClock, monthOffset) {
+  const y = bdWallClock.getUTCFullYear();
+  const m = bdWallClock.getUTCMonth();
+  const bdMidnightAsUTCFields = new Date(Date.UTC(y, m + monthOffset, 1, 0, 0, 0));
+  return new Date(bdMidnightAsUTCFields.getTime() - BD_OFFSET_MS);
+}
+
+// A "YYYY-MM-DD" BD-calendar date string → the UTC instant of that day's
+// BD midnight. Used to turn user-supplied report date-range bounds into
+// Mongo-queryable UTC instants.
+function bdDateStringToUTC(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const bdMidnightAsUTCFields = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
+  return new Date(bdMidnightAsUTCFields.getTime() - BD_OFFSET_MS);
+}
 
 // ---------------------------------------------------------------------------
 // Auth middleware for the data API.
@@ -141,7 +169,11 @@ function listParams(req) {
 // Pages (EJS shells — carry no data, so they stay public; data needs a token).
 // ---------------------------------------------------------------------------
 router.get('/', (_req, res) => res.render('admin'));
-router.get('/transactions', (_req, res) => res.render('transactions'));
+router.get('/transactions', (req, res) => {
+  res.render('transactions', { initialSearch: (req.query.search || '').trim() });
+});
+router.get('/reports', (_req, res) => res.render('reports'));
+router.get('/health', (_req, res) => res.render('health'));
 
 // ---------------------------------------------------------------------------
 // htmx partials — server-rendered HTML fragments (token required).
@@ -155,13 +187,63 @@ router.get('/partials/recent', requireAdmin, async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// Transactions table body + pager.
+// Shared by the HTML partial (Health page) and the JSON endpoint (dashboard
+// alert banner) so both read the exact same freshness/event-count logic.
+async function computeHealth() {
+  const now = new Date();
+  const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const since7d  = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const freshness = await Promise.all(
+    Object.entries(MODELS).map(async ([name, Model]) => {
+      const last = await Model.findOne().sort({ dateReceived: -1 }).select('dateReceived').lean();
+      const lastReceivedAt = last ? last.dateReceived : null;
+      const hoursSince = lastReceivedAt ? (now - new Date(lastReceivedAt)) / 3600000 : null;
+      return { name, lastReceivedAt, hoursSince };
+    })
+  );
+
+  async function countsSince(since) {
+    const agg = await WebhookEvent.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      { $group: { _id: '$reason', count: { $sum: 1 } } },
+    ]);
+    const out = { unmatched: 0, duplicate: 0, unknown_sender: 0, error: 0 };
+    for (const r of agg) out[r._id] = r.count;
+    return out;
+  }
+  const [counts24h, counts7d] = await Promise.all([countsSince(since24h), countsSince(since7d)]);
+
+  const recentEvents = await WebhookEvent.find().sort({ createdAt: -1 }).limit(50).lean();
+
+  return { freshness, counts24h, counts7d, recentEvents };
+}
+
+// Ingestion health — per-platform freshness + webhook-event counts/log.
+router.get('/partials/health', requireAdmin, async (_req, res, next) => {
+  try {
+    const health = await computeHealth();
+    res.render('partials/health', { ...health, h });
+  } catch (err) { next(err); }
+});
+
+// JSON form of the same data — powers the dashboard's alert banner.
+router.get('/api/health', requireAdmin, async (_req, res, next) => {
+  try {
+    const { freshness, counts24h, counts7d } = await computeHealth();
+    res.json({ freshness, counts24h, counts7d });
+  } catch (err) { next(err); }
+});
+
+// Transactions table body — full shell on first load/filter change, just the
+// next page of rows (+ scroll sentinel) on infinite-scroll continuation.
 router.get('/partials/transactions', requireAdmin, async (req, res, next) => {
   try {
     const params = listParams(req);
     if (req.query.limit == null) params.limit = 20;
     const data = await fetchPayments(params);
-    res.render('partials/transactions-table', { ...data, platform: params.platform, search: params.search, h });
+    const view = data.page > 1 ? 'partials/transactions-rows' : 'partials/transactions-table';
+    res.render(view, { ...data, platform: params.platform, search: params.search, h });
   } catch (err) {
     if (err.status === 400) return res.status(400).send('<div class="empty">Unknown platform.</div>');
     next(err);
@@ -243,11 +325,163 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
       Object.values(revenueSeries).reduce((sum, arr) => sum + arr[i], 0)
     );
 
+    // ---- Period comparisons ----
+    // today/yesterday/last7/prev7 all fall inside the 14-day window above, so
+    // they're read off the same countMap/amountMap rather than re-queried.
+    function sumRange(startIdx, endIdx) {
+      let count = 0, amount = 0;
+      for (const p of perPlatform) {
+        for (let i = startIdx; i <= endIdx; i++) {
+          const day = labels[i];
+          count += p.countMap[day] || 0;
+          amount += p.amountMap[day] || 0;
+        }
+      }
+      return { count, amount };
+    }
+    const today     = sumRange(DAYS - 1, DAYS - 1);
+    const yesterday = sumRange(DAYS - 2, DAYS - 2);
+    const last7     = sumRange(DAYS - 7, DAYS - 1);
+    const prev7     = sumRange(0, DAYS - 8);
+
+    // Month-to-date vs the same elapsed window last month (so day 3 of a
+    // month doesn't compare against a full prior month and look like a drop).
+    const now = new Date();
+    const nowBD = bdNow();
+    const thisMonthStart = bdMonthStartUTC(nowBD, 0);
+    const lastMonthStart = bdMonthStartUTC(nowBD, -1);
+    const lastMonthComparableEnd = new Date(lastMonthStart.getTime() + (now - thisMonthStart));
+
+    const monthRanges = await Promise.all(
+      Object.values(MODELS).map(async (Model) => {
+        const [monthAgg, prevMonthAgg] = await Promise.all([
+          Model.aggregate([
+            { $match: { dateReceived: { $gte: thisMonthStart } } },
+            { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+          ]),
+          Model.aggregate([
+            { $match: { dateReceived: { $gte: lastMonthStart, $lt: lastMonthComparableEnd } } },
+            { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+          ]),
+        ]);
+        return { month: monthAgg[0] || { count: 0, amount: 0 }, prevMonth: prevMonthAgg[0] || { count: 0, amount: 0 } };
+      })
+    );
+    const month = monthRanges.reduce(
+      (a, r) => ({ count: a.count + r.month.count, amount: a.amount + r.month.amount }), { count: 0, amount: 0 });
+    const prevMonthSame = monthRanges.reduce(
+      (a, r) => ({ count: a.count + r.prevMonth.count, amount: a.amount + r.prevMonth.amount }), { count: 0, amount: 0 });
+
+    // ---- Peak hours — transaction count by BD hour-of-day, last 30 days ----
+    const PEAK_DAYS = 30;
+    const peakSince = new Date(now.getTime() - PEAK_DAYS * 24 * 60 * 60 * 1000);
+    const peakCounts = new Array(24).fill(0);
+    await Promise.all(
+      Object.values(MODELS).map(async (Model) => {
+        const agg = await Model.aggregate([
+          { $match: { dateReceived: { $gte: peakSince } } },
+          { $group: { _id: { $hour: { date: '$dateReceived', timezone: BD_TZ } }, count: { $sum: 1 } } },
+        ]);
+        for (const row of agg) peakCounts[row._id] += row.count;
+      })
+    );
+
     res.json({
       totals,
       daily: { labels, series },
       revenue: { labels, series: revenueSeries, total: revenueTotal },
+      periods: { today, yesterday, last7, prev7, month, prevMonthSame },
+      peakHours: { labels: Array.from({ length: 24 }, (_, i) => i), counts: peakCounts },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /admin/api/reports?from=YYYY-MM-DD&to=YYYY-MM-DD
+//   Custom date-range totals/fees/daily series + a top-senders breakdown for
+//   drilling into the transactions list. Defaults to the last 30 BD days.
+// ---------------------------------------------------------------------------
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+router.get('/api/reports', requireAdmin, async (req, res, next) => {
+  try {
+    const todayStr = bdNow().toISOString().slice(0, 10);
+    const defaultFromStr = (() => {
+      const d = bdNow();
+      d.setUTCDate(d.getUTCDate() - 29);
+      return d.toISOString().slice(0, 10);
+    })();
+
+    const from = DATE_RE.test(req.query.from) ? req.query.from : defaultFromStr;
+    const to   = DATE_RE.test(req.query.to)   ? req.query.to   : todayStr;
+
+    const rangeStart = bdDateStringToUTC(from);
+    let rangeEndExclusive = new Date(bdDateStringToUTC(to).getTime() + 24 * 60 * 60 * 1000);
+    // Guard against a runaway day-axis loop on bad/huge input.
+    const MAX_DAYS = 366;
+    if ((rangeEndExclusive - rangeStart) / (24 * 60 * 60 * 1000) > MAX_DAYS) {
+      rangeEndExclusive = new Date(rangeStart.getTime() + MAX_DAYS * 24 * 60 * 60 * 1000);
+    }
+    const match = { dateReceived: { $gte: rangeStart, $lt: rangeEndExclusive } };
+
+    const perPlatform = await Promise.all(
+      Object.entries(MODELS).map(async ([name, Model]) => {
+        const [totalsAgg, dailyAgg, senderAgg] = await Promise.all([
+          Model.aggregate([
+            { $match: match },
+            { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' }, fee: { $sum: '$fee' } } },
+          ]),
+          Model.aggregate([
+            { $match: match },
+            {
+              $group: {
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$dateReceived', timezone: BD_TZ } },
+                amount: { $sum: '$amount' },
+              },
+            },
+          ]),
+          Model.aggregate([
+            { $match: match },
+            { $group: { _id: '$sender', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+          ]),
+        ]);
+        return { name, totals: totalsAgg[0] || { count: 0, amount: 0, fee: 0 }, dailyAgg, senderAgg };
+      })
+    );
+
+    // Day axis across the requested range, in BD calendar terms.
+    const labels = [];
+    const cursor = new Date(rangeStart);
+    while (cursor < rangeEndExclusive) {
+      const bd = new Date(cursor.getTime() + BD_OFFSET_MS);
+      labels.push(bd.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    const totals = { count: 0, amount: 0, fee: 0, byPlatform: {} };
+    const series = {};
+    const senderMap = {};
+    for (const p of perPlatform) {
+      totals.count  += p.totals.count;
+      totals.amount += p.totals.amount;
+      totals.fee    += p.totals.fee || 0;
+      totals.byPlatform[p.name] = { count: p.totals.count, amount: p.totals.amount, fee: p.totals.fee || 0 };
+
+      const amountMap = {};
+      for (const d of p.dailyAgg) amountMap[d._id] = d.amount;
+      series[p.name] = labels.map((day) => amountMap[day] || 0);
+
+      for (const s of p.senderAgg) {
+        if (!senderMap[s._id]) senderMap[s._id] = { sender: s._id, count: 0, amount: 0 };
+        senderMap[s._id].count += s.count;
+        senderMap[s._id].amount += s.amount;
+      }
+    }
+    const topSenders = Object.values(senderMap).sort((a, b) => b.amount - a.amount).slice(0, 15);
+
+    res.json({ from, to, totals, daily: { labels, series }, topSenders });
   } catch (err) {
     next(err);
   }

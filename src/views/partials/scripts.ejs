@@ -86,6 +86,40 @@
             .catch(function () {});
         },
       });
+
+      // Pipeline-trust + performance alerts, shown via the bell icon in the
+      // nav bar on every /admin/* page (not just the dashboard). Recomputed
+      // whenever fresh stats arrive (initial login, any page's "Refresh").
+      Alpine.store('alerts', {
+        items: [],
+        open: false,
+
+        computeFrom: function (stats, health) {
+          var out = [];
+          if (stats && stats.periods && stats.periods.prev7 && stats.periods.prev7.amount) {
+            var pct = Math.round(((stats.periods.last7.amount - stats.periods.prev7.amount) / stats.periods.prev7.amount) * 100);
+            if (pct <= -20) out.push({ cls: 'down', text: 'Revenue down ' + Math.abs(pct) + '% over the last 7 days vs the previous 7.' });
+          }
+          ((health && health.freshness) || []).forEach(function (f) {
+            var name = f.name === 'bkash' ? 'bKash' : f.name[0].toUpperCase() + f.name.slice(1);
+            if (f.hoursSince == null) out.push({ cls: 'warn', text: 'No ' + name + ' transactions have ever been received.' });
+            else if (f.hoursSince > 6) out.push({ cls: 'warn', text: 'No ' + name + ' transactions received in ' + Math.round(f.hoursSince) + ' hours.' });
+          });
+          this.items = out;
+        },
+
+        load: function (stats) {
+          var self = this;
+          fetch('/admin/api/health', { headers: { 'x-admin-token': Alpine.store('auth').token } })
+            .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(function (health) { self.computeFrom(stats, health); })
+            .catch(function () {});
+        },
+      });
+
+      window.addEventListener('stats-loaded', function (e) {
+        Alpine.store('alerts').load(e.detail);
+      });
     });
   })();
 </script>
