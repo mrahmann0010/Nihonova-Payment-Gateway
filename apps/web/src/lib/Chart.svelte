@@ -28,13 +28,21 @@
   // input, so we update data/options in place when the type is unchanged.
   $effect(() => {
     if (!canvas) return;
+    // `config.data` is built from `$state` (auth.stats), so its nested arrays
+    // are reactive proxies. Chart.js calls Object.defineProperty on the data
+    // it's given, which throws on state proxies (state_descriptors_fixed) and
+    // aborts the render. Snapshot `data` to plain objects first. `options` is
+    // left as-is: it isn't proxied and may hold functions (tick/tooltip
+    // callbacks) that $state.snapshot can't clone.
+    const data = $state.snapshot(config.data) as ChartConfiguration['data'];
+    const options = config.options ?? {};
     if (chart && chartType === config.type) {
-      chart.data = config.data;
-      chart.options = config.options ?? {};
+      chart.data = data;
+      chart.options = options;
       chart.update();
     } else {
       chart?.destroy();
-      chart = new Chart(canvas, config);
+      chart = new Chart(canvas, { ...config, data });
       chartType = config.type;
     }
   });
