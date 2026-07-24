@@ -1,7 +1,6 @@
 // Establishes and caches the Mongoose connection.
-// On Vercel, Lambda/serverless containers are reused across requests within the
-// same warm instance. Checking readyState before calling connect() means we
-// never open a second connection on a warm invocation.
+// Called once at startup (see server.js); the readyState guard also makes it a
+// safe no-op if invoked again, so callers never open a second connection.
 
 const mongoose = require('mongoose');
 
