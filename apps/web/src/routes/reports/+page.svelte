@@ -2,6 +2,8 @@
   import { auth } from '$lib/stores/auth.svelte';
   import { api, type Report } from '$lib/api';
   import Chart from '$lib/Chart.svelte';
+  import Skeleton from '$lib/Skeleton.svelte';
+  import SkeletonStat from '$lib/SkeletonStat.svelte';
   import { baseOptions, stackedBarScales } from '$lib/chartOpts';
   import { COLORS, PLATFORMS, fmtAmount, fmtCount, taka, platformLabel } from '$lib/format';
   import type { ChartConfiguration } from 'chart.js';
@@ -9,13 +11,19 @@
   let from = $state('');
   let to = $state('');
   let data = $state<Report | null>(null);
+  let loading = $state(false);
 
   async function load() {
     if (!auth.authed) return;
-    const r = await api.reports(from || undefined, to || undefined);
-    data = r;
-    from = r.from;
-    to = r.to;
+    loading = true;
+    try {
+      const r = await api.reports(from || undefined, to || undefined);
+      data = r;
+      from = r.from;
+      to = r.to;
+    } finally {
+      loading = false;
+    }
   }
 
   function setPreset(days: number) {
@@ -68,10 +76,19 @@
   <input type="date" bind:value={from} />
   <span class="dim">→</span>
   <input type="date" bind:value={to} />
-  <button class="btn" onclick={load}>Apply</button>
+  <button class="btn" onclick={load} disabled={loading}>{loading ? 'Loading…' : 'Apply'}</button>
 </div>
 
-{#if data}
+{#if !data && loading}
+  <div class="section-lbl"><Skeleton width="180px" height="0.8rem" /></div>
+  <div class="stats">
+    {#each Array(4) as _}<SkeletonStat />{/each}
+  </div>
+  <div class="panel" style="margin:20px 0 26px;">
+    <div style="margin-bottom:14px;"><Skeleton width="30%" height="1rem" /></div>
+    <Skeleton width="100%" height="280px" radius="8px" />
+  </div>
+{:else if data}
   <div class="section-lbl">Totals · {data.from} to {data.to}</div>
   <div class="stats">
     <div class="stat">

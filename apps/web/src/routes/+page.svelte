@@ -2,20 +2,25 @@
   import { auth } from '$lib/stores/auth.svelte';
   import { api, type Payment } from '$lib/api';
   import Chart from '$lib/Chart.svelte';
+  import Skeleton from '$lib/Skeleton.svelte';
+  import SkeletonStat from '$lib/SkeletonStat.svelte';
   import { baseOptions, stackedBarScales, plainBarScales } from '$lib/chartOpts';
   import { COLORS, ACCENT, PLATFORMS, fmtAmount, fmtCount, taka, fmtAgo, fmtDateTime, platformLabel } from '$lib/format';
   import type { ChartConfiguration } from 'chart.js';
 
-  const updated = $derived(auth.stats ? 'Updated ' + new Date().toLocaleTimeString() : '—');
+  const updated = $derived(auth.stats ? 'Updated ' + new Date().toLocaleTimeString() : 'Loading…');
+  const statsLoading = $derived(!auth.stats);
 
   // Latest transaction + last 5 (payments, limit 6).
   let recent = $state<Payment[]>([]);
+  let recentLoaded = $state(false);
   let showRecent = $state(false);
   $effect(() => {
     if (!auth.authed) return;
     api.payments({ platform: 'all', page: 1, limit: 6 })
       .then((r) => (recent = r.payments))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => (recentLoaded = true));
   });
   const latest = $derived(recent[0]);
 
@@ -93,7 +98,8 @@
   });
 
   const revTotal = $derived.by(() => {
-    const sum = (auth.stats?.revenue.total || []).reduce((a, b) => a + b, 0);
+    if (!auth.stats) return '';
+    const sum = (auth.stats.revenue.total || []).reduce((a, b) => a + b, 0);
     return taka(sum) + ' in 14 days';
   });
 
@@ -128,7 +134,13 @@
     <h3>Latest transaction</h3>
     <a class="btn ghost" href="/transactions">See all ›</a>
   </div>
-  {#if !latest}
+  {#if !recentLoaded}
+    <div class="latest">
+      <Skeleton width="120px" height="0.9rem" />
+      <div style="margin:12px 0;"><Skeleton width="200px" height="1.5rem" /></div>
+      <Skeleton width="60%" height="0.85rem" />
+    </div>
+  {:else if !latest}
     <div class="empty">No payments yet.</div>
   {:else}
     <div class="latest">
@@ -168,6 +180,9 @@
 
 <div class="section-lbl">Overview</div>
 <div class="overview">
+  {#if statsLoading}
+    {#each Array(4) as _}<SkeletonStat />{/each}
+  {/if}
   {#each overviewCards as c}
     <div class="stat">
       <div class="lbl">{c.label}</div>
@@ -182,6 +197,9 @@
 
 <div class="section-lbl">All-time</div>
 <div class="stats">
+  {#if statsLoading}
+    {#each Array(4) as _}<SkeletonStat />{/each}
+  {/if}
   {#each allTimeCards as c}
     <div class="stat">
       <div class="lbl">
@@ -198,11 +216,11 @@
 <div class="charts">
   <div class="panel">
     <h3>Payments per day · last 14 days</h3>
-    {#if trendConfig}<Chart config={trendConfig} />{/if}
+    {#if trendConfig}<Chart config={trendConfig} />{:else}<Skeleton width="100%" height="280px" radius="8px" />{/if}
   </div>
   <div class="panel">
     <h3>Share by platform</h3>
-    {#if shareConfig}<Chart config={shareConfig} />{/if}
+    {#if shareConfig}<Chart config={shareConfig} />{:else}<Skeleton width="100%" height="280px" radius="8px" />{/if}
   </div>
 </div>
 
@@ -211,12 +229,12 @@
     <h3>Revenue per day · last 14 days</h3>
     <span class="sub">{revTotal}</span>
   </div>
-  {#if revenueConfig}<Chart config={revenueConfig} />{/if}
+  {#if revenueConfig}<Chart config={revenueConfig} />{:else}<Skeleton width="100%" height="280px" radius="8px" />{/if}
 </div>
 
 <div class="panel" style="margin-bottom:40px;">
   <h3>Peak hours · last 30 days</h3>
-  {#if peakConfig}<Chart config={peakConfig} />{/if}
+  {#if peakConfig}<Chart config={peakConfig} />{:else}<Skeleton width="100%" height="280px" radius="8px" />{/if}
 </div>
 
 <style>

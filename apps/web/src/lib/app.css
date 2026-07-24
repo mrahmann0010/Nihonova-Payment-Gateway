@@ -114,3 +114,24 @@ tbody tr:last-child { border-bottom: none; }
 
 .loading { color: var(--muted); padding: 20px; text-align: center; }
 [hidden] { display: none !important; }
+
+/* Skeleton loading placeholders */
+.skel {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(
+    100deg,
+    var(--panel-2) 30%,
+    rgba(148, 163, 184, 0.10) 50%,
+    var(--panel-2) 70%
+  );
+  background-size: 200% 100%;
+  animation: skel-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes skel-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; }
+}

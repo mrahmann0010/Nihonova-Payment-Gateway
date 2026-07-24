@@ -1,13 +1,21 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth.svelte';
   import { api, type Health } from '$lib/api';
+  import Skeleton from '$lib/Skeleton.svelte';
+  import SkeletonStat from '$lib/SkeletonStat.svelte';
   import { fmtAgo, fmtDateTime, platformLabel } from '$lib/format';
 
   let data = $state<Health | null>(null);
+  let loading = $state(false);
 
   async function load() {
     if (!auth.authed) return;
-    data = await api.health();
+    loading = true;
+    try {
+      data = await api.health();
+    } finally {
+      loading = false;
+    }
   }
 
   $effect(() => {
@@ -28,12 +36,22 @@
     <div class="sub">Is every SMS actually making it into the database?</div>
   </div>
   <div class="head-actions">
-    <button class="btn ghost" onclick={load}>Refresh</button>
+    <button class="btn ghost" onclick={load} disabled={loading}>{loading ? 'Refreshing…' : 'Refresh'}</button>
     <button class="btn ghost" onclick={() => auth.logout()}>Sign out</button>
   </div>
 </div>
 
-{#if data}
+{#if !data && loading}
+  <div class="section-lbl"><Skeleton width="220px" height="0.8rem" /></div>
+  <div class="stats">
+    {#each Array(3) as _}<SkeletonStat />{/each}
+  </div>
+  <div class="section-lbl"><Skeleton width="140px" height="0.8rem" /></div>
+  <div class="charts">
+    <div class="panel"><Skeleton width="40%" height="1rem" /><div style="margin-top:14px;"><Skeleton width="100%" height="120px" radius="8px" /></div></div>
+    <div class="panel"><Skeleton width="40%" height="1rem" /><div style="margin-top:14px;"><Skeleton width="100%" height="120px" radius="8px" /></div></div>
+  </div>
+{:else if data}
   <div class="section-lbl">Freshness · last received per platform</div>
   <div class="stats">
     {#each data.freshness as f}

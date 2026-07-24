@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { auth } from '$lib/stores/auth.svelte';
   import { api, type Payment } from '$lib/api';
+  import Skeleton from '$lib/Skeleton.svelte';
   import { fmtAmount, fmtDateTime, platformLabel } from '$lib/format';
 
   const PLATFORM_TABS = ['all', 'bkash', 'nagad', 'rocket'];
@@ -91,7 +92,13 @@
 </div>
 
 <div class="table-wrap">
-  <div class="info-row">{total.toLocaleString()} record{total === 1 ? '' : 's'}</div>
+  <div class="info-row">
+    {#if !rows.length && loading}
+      <Skeleton width="90px" height="0.82rem" />
+    {:else}
+      {total.toLocaleString()} record{total === 1 ? '' : 's'}
+    {/if}
+  </div>
   <div class="table-scroll">
     <table>
       <thead>
@@ -101,7 +108,13 @@
         </tr>
       </thead>
       <tbody>
-        {#if !rows.length && !loading}
+        {#if !rows.length && loading}
+          {#each Array(8) as _}
+            <tr>
+              {#each Array(9) as _}<td><Skeleton width="70%" height="0.9rem" /></td>{/each}
+            </tr>
+          {/each}
+        {:else if !rows.length}
           <tr><td colspan="9" class="empty">No payments found.</td></tr>
         {:else}
           {#each rows as p (p.platform + p.trxId)}
