@@ -115,6 +115,42 @@
     {#if chartConfig}<Chart config={chartConfig} />{/if}
   </div>
 
+  <div class="section-lbl">Customers · {data.from} to {data.to}</div>
+  <div class="stats">
+    <div class="stat">
+      <div class="lbl">Unique customers</div>
+      <div class="num">{fmtCount(data.customers.total)}</div>
+      <div class="amt muted">distinct senders</div>
+    </div>
+    <div class="stat">
+      <div class="lbl"><span class="dot ret"></span><span>Returning</span></div>
+      <div class="num">{fmtCount(data.customers.returning)}</div>
+      <div class="amt muted">seen before this range</div>
+    </div>
+    <div class="stat">
+      <div class="lbl"><span class="dot new"></span><span>New</span></div>
+      <div class="num">{fmtCount(data.customers.new)}</div>
+      <div class="amt muted">first seen in range</div>
+    </div>
+    <div class="stat">
+      <div class="lbl">Recurring rate</div>
+      <div class="num">{data.customers.returningPct}%</div>
+      <div class="amt muted">of unique customers</div>
+    </div>
+  </div>
+
+  {#if data.customers.total}
+    <div class="cust-bar" role="img"
+      aria-label="{data.customers.returningPct}% returning, {100 - data.customers.returningPct}% new">
+      <div class="seg-ret" style="width:{data.customers.returningPct}%"></div>
+      <div class="seg-new" style="width:{100 - data.customers.returningPct}%"></div>
+    </div>
+    <div class="cust-legend">
+      <span><span class="dot ret"></span> Returning {data.customers.returningPct}%</span>
+      <span><span class="dot new"></span> New {100 - data.customers.returningPct}%</span>
+    </div>
+  {/if}
+
   <div class="section-lbl">Top senders</div>
   <div class="table-wrap">
     <div class="table-scroll">
@@ -138,3 +174,19 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .dot.ret { background: #34d399; }
+  .dot.new { background: var(--accent); }
+  .cust-bar {
+    display: flex; height: 12px; border-radius: 999px; overflow: hidden;
+    margin: 14px 0 8px; background: var(--panel-2);
+  }
+  .cust-bar .seg-ret { background: #34d399; }
+  .cust-bar .seg-new { background: var(--accent); }
+  .cust-legend {
+    display: flex; gap: 18px; font-size: 0.82rem; color: var(--muted);
+    margin-bottom: 26px;
+  }
+  .cust-legend .dot { margin-right: 6px; }
+</style>

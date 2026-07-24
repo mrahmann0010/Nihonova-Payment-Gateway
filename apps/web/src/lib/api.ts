@@ -76,12 +76,14 @@ export interface Health {
 }
 
 export interface TopSender { sender: string; count: number; amount: number }
+export interface Customers { total: number; returning: number; new: number; returningPct: number }
 export interface Report {
   from: string;
   to: string;
   totals: { count: number; amount: number; fee: number; byPlatform: Record<string, PlatformTotals & { fee: number }> };
   daily: { labels: string[]; series: Record<string, number[]> };
   topSenders: TopSender[];
+  customers: Customers;
 }
 
 export interface Session { username: string }

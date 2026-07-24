@@ -455,7 +455,32 @@ router.get('/api/reports', requireAdmin, async (req, res, next) => {
     }
     const topSenders = Object.values(senderMap).sort((a, b) => b.amount - a.amount).slice(0, 15);
 
-    res.json({ from, to, totals, daily: { labels, series }, topSenders });
+    // Returning vs new customers: of the distinct senders active in this range,
+    // how many also transacted before it started. Sender identity is the phone
+    // string, shared across platforms (mirrors how senderMap is merged above).
+    const rangeSenders = Object.keys(senderMap);
+    const returningSet = new Set();
+    if (rangeSenders.length) {
+      const priorLists = await Promise.all(
+        Object.values(MODELS).map((Model) =>
+          Model.distinct('sender', {
+            dateReceived: { $lt: rangeStart },
+            sender: { $in: rangeSenders },
+          })
+        )
+      );
+      for (const list of priorLists) for (const s of list) returningSet.add(s);
+    }
+    const totalCustomers = rangeSenders.length;
+    const returning = returningSet.size;
+    const customers = {
+      total: totalCustomers,
+      returning,
+      new: totalCustomers - returning,
+      returningPct: totalCustomers ? Math.round((returning / totalCustomers) * 100) : 0,
+    };
+
+    res.json({ from, to, totals, daily: { labels, series }, topSenders, customers });
   } catch (err) {
     next(err);
   }
