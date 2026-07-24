@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const express        = require('express');
+const compression    = require('compression');
 const cookieParser   = require('cookie-parser');
 const connectDB      = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
@@ -37,6 +38,10 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
+
+// Gzip/brotli response compression. JSON payloads (payment lists, stats series)
+// compress several-fold, cutting transfer time for the dashboard's data calls.
+app.use(compression());
 
 app.use(cookieParser());
 

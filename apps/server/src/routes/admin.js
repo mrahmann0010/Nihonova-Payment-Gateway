@@ -25,6 +25,10 @@ const { verify: verifyJwt, COOKIE_NAME } = require('../services/jwt');
 
 const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
 
+// Only the fields the dashboard renders (see serialize()). Projecting these
+// keeps the large `rawMessage` text off the wire and out of memory.
+const LIST_FIELDS = 'trxId amount sender fee balance ref dateReceived timeReceived rawDate simNumber';
+
 // Bangladesh local time — dates are stored in UTC, so we shift grouping back
 // to +06:00 to keep "per day" buckets aligned with the local calendar.
 const BD_TZ = '+06:00';
@@ -137,7 +141,7 @@ async function fetchPayments({ platform, page, limit, search }) {
     if (!Model) { const e = new Error('Unknown platform'); e.status = 400; throw e; }
 
     const [docs, total] = await Promise.all([
-      Model.find(query).sort({ dateReceived: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      Model.find(query).select(LIST_FIELDS).sort({ dateReceived: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       Model.countDocuments(query),
     ]);
     return { payments: docs.map((d) => serialize(d, platform)), total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
@@ -149,7 +153,7 @@ async function fetchPayments({ platform, page, limit, search }) {
   const results = await Promise.all(
     Object.entries(MODELS).map(async ([name, Model]) => {
       const [docs, count] = await Promise.all([
-        Model.find(query).sort({ dateReceived: -1 }).limit(windowSize).lean(),
+        Model.find(query).select(LIST_FIELDS).sort({ dateReceived: -1 }).limit(windowSize).lean(),
         Model.countDocuments(query),
       ]);
       return { name, docs, count };
