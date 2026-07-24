@@ -1,8 +1,8 @@
 // Pipeline-trust + performance alerts shown in the nav bell. Recomputed from
-// the latest stats + health whenever either is refreshed. Ported from the old
-// Alpine `alerts` store.
+// the latest stats + health whenever either is refreshed. The layout drives
+// `computeFrom` off the stats/health TanStack queries.
 
-import { api, type Stats, type Health } from '$lib/api';
+import { type Stats, type Health } from '$lib/api';
 import { platformLabel } from '$lib/format';
 
 export interface Alert { cls: 'down' | 'warn'; text: string }
@@ -24,15 +24,6 @@ class Alerts {
       else if (f.hoursSince > 6) out.push({ cls: 'warn', text: `No ${name} transactions received in ${Math.round(f.hoursSince)} hours.` });
     }
     this.items = out;
-  }
-
-  async load(stats: Stats | null) {
-    try {
-      const health = await api.health();
-      this.computeFrom(stats, health);
-    } catch {
-      /* non-fatal — bell just stays empty */
-    }
   }
 }
 

@@ -1,10 +1,16 @@
 <script lang="ts">
   import '$lib/app.css';
   import { page } from '$app/state';
+  import { QueryClientProvider, createQuery } from '@tanstack/svelte-query';
   import { auth } from '$lib/stores/auth.svelte';
   import { alerts } from '$lib/stores/alerts.svelte';
+  import { api } from '$lib/api';
+  import { createQueryClient, keys } from '$lib/query';
 
   let { children } = $props();
+
+  // One QueryClient for the whole app; pages read it from context.
+  const queryClient = createQueryClient();
 
   let username = $state('');
   let password = $state('');
@@ -17,6 +23,20 @@
   // render — avoids flashing the login screen for an already-signed-in user.
   $effect(() => {
     auth.init();
+  });
+
+  // Nav-bell alerts run off the same polled stats/health queries the pages use.
+  // Explicit client (not context) because these live in the layout itself.
+  const statsQuery = createQuery(
+    () => ({ queryKey: keys.stats, queryFn: api.stats, enabled: auth.authed }),
+    () => queryClient
+  );
+  const healthQuery = createQuery(
+    () => ({ queryKey: keys.health, queryFn: api.health, enabled: auth.authed }),
+    () => queryClient
+  );
+  $effect(() => {
+    alerts.computeFrom(statsQuery.data ?? null, healthQuery.data ?? null);
   });
 
   const tabs = [
@@ -36,6 +56,7 @@
   />
 </svelte:head>
 
+<QueryClientProvider client={queryClient}>
 {#if !auth.ready}
   <main class="gate"><p class="muted">Loading…</p></main>
 {:else if !auth.authed}
@@ -89,6 +110,7 @@
     {@render children()}
   </main>
 {/if}
+</QueryClientProvider>
 
 <style>
   .gate { max-width: 360px; margin: 12vh auto 0; padding: 0 20px; }

@@ -1,26 +1,23 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth.svelte';
-  import { api, type Health } from '$lib/api';
+  import { api } from '$lib/api';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { keys } from '$lib/query';
   import Skeleton from '$lib/Skeleton.svelte';
   import SkeletonStat from '$lib/SkeletonStat.svelte';
   import { fmtAgo, fmtDateTime, platformLabel } from '$lib/format';
 
-  let data = $state<Health | null>(null);
-  let loading = $state(false);
+  const q = createQuery(() => ({
+    queryKey: keys.health,
+    queryFn: api.health,
+    enabled: auth.authed
+  }));
+  const data = $derived(q.data ?? null);
+  const loading = $derived(q.isFetching);
 
-  async function load() {
-    if (!auth.authed) return;
-    loading = true;
-    try {
-      data = await api.health();
-    } finally {
-      loading = false;
-    }
+  function load() {
+    q.refetch();
   }
-
-  $effect(() => {
-    if (auth.authed && !data) load();
-  });
 
   function freshnessStatus(hoursSince: number | null): string {
     if (hoursSince == null) return 'down';

@@ -2,66 +2,64 @@
   import { page } from '$app/state';
   import { auth } from '$lib/stores/auth.svelte';
   import { api, type Payment } from '$lib/api';
+  import { createInfiniteQuery } from '@tanstack/svelte-query';
+  import { keys } from '$lib/query';
   import Skeleton from '$lib/Skeleton.svelte';
   import { fmtAmount, fmtDateTime, platformLabel } from '$lib/format';
 
   const PLATFORM_TABS = ['all', 'bkash', 'nagad', 'rocket'];
   const LIMIT = 20;
 
+  const initialSearch = page.url.searchParams.get('search') ?? '';
   let platform = $state('all');
-  let search = $state(page.url.searchParams.get('search') ?? '');
-  let rows = $state<Payment[]>([]);
-  let total = $state(0);
-  let currentPage = $state(1);
-  let pages = $state(1);
-  let loading = $state(false);
+  let search = $state(initialSearch);
 
-  // Load page 1 for the current platform/search (resets the list).
-  async function loadFirst() {
-    if (!auth.authed) return;
-    loading = true;
-    try {
-      const r = await api.payments({ platform, search, page: 1, limit: LIMIT });
-      rows = r.payments;
-      total = r.total;
-      pages = r.pages;
-      currentPage = 1;
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function loadMore() {
-    if (loading || currentPage >= pages || !auth.authed) return;
-    loading = true;
-    try {
-      const r = await api.payments({ platform, search, page: currentPage + 1, limit: LIMIT });
-      rows = [...rows, ...r.payments];
-      currentPage = r.page;
-      pages = r.pages;
-    } finally {
-      loading = false;
-    }
-  }
-
-  // Reload whenever platform or (debounced) search changes.
+  // Debounced search so we don't refetch on every keystroke.
+  let debouncedSearch = $state(initialSearch);
   let debounce: ReturnType<typeof setTimeout>;
   $effect(() => {
-    // reference reactive deps
-    platform;
     search;
-    auth.authed;
     clearTimeout(debounce);
-    debounce = setTimeout(loadFirst, 300);
+    debounce = setTimeout(() => (debouncedSearch = search), 300);
     return () => clearTimeout(debounce);
   });
+
+  // Infinite, background-polled list. Refetching re-pulls every loaded page, so
+  // a new transaction lands at the top on its own — no manual reload.
+  const q = createInfiniteQuery(() => ({
+    queryKey: keys.payments({ platform, search: debouncedSearch }),
+    queryFn: ({ pageParam }) =>
+      api.payments({ platform, search: debouncedSearch, page: pageParam, limit: LIMIT }),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page < last.pages ? last.page + 1 : undefined),
+    enabled: auth.authed
+  }));
+
+  // Flatten pages, de-duping by key: a record inserted mid-scroll can otherwise
+  // appear on two adjacent pages after a refetch.
+  const rows = $derived.by(() => {
+    const seen = new Set<string>();
+    const out: Payment[] = [];
+    for (const pg of q.data?.pages ?? []) {
+      for (const p of pg.payments) {
+        const k = p.platform + p.trxId;
+        if (!seen.has(k)) { seen.add(k); out.push(p); }
+      }
+    }
+    return out;
+  });
+  const total = $derived(q.data?.pages[0]?.total ?? 0);
+  const loading = $derived(q.isPending || q.isFetchingNextPage);
+  const hasMore = $derived(q.hasNextPage);
 
   // Infinite scroll: observe the sentinel row.
   let sentinel = $state<HTMLElement>();
   $effect(() => {
     if (!sentinel) return;
     const io = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) loadMore();
+      if (entries[0].isIntersecting && q.hasNextPage && !q.isFetchingNextPage) {
+        q.fetchNextPage();
+      }
     });
     io.observe(sentinel);
     return () => io.disconnect();
@@ -131,9 +129,9 @@
             </tr>
           {/each}
         {/if}
-        {#if currentPage < pages}
+        {#if hasMore}
           <tr bind:this={sentinel}>
-            <td colspan="9" class="empty">{loading ? 'Loading more…' : ''}</td>
+            <td colspan="9" class="empty">{q.isFetchingNextPage ? 'Loading more…' : ''}</td>
           </tr>
         {/if}
       </tbody>

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth.svelte';
-  import { api, type Payment } from '$lib/api';
+  import { api } from '$lib/api';
+  import { createQuery, useQueryClient } from '@tanstack/svelte-query';
+  import { keys } from '$lib/query';
   import Chart from '$lib/Chart.svelte';
   import Skeleton from '$lib/Skeleton.svelte';
   import SkeletonStat from '$lib/SkeletonStat.svelte';
@@ -8,20 +10,33 @@
   import { COLORS, ACCENT, PLATFORMS, fmtAmount, fmtCount, taka, fmtAgo, fmtDateTime, platformLabel } from '$lib/format';
   import type { ChartConfiguration } from 'chart.js';
 
-  const updated = $derived(auth.stats ? 'Updated ' + new Date().toLocaleTimeString() : 'Loading…');
-  const statsLoading = $derived(!auth.stats);
+  const client = useQueryClient();
+
+  // Polled in the background by TanStack Query — new records show up on their own.
+  const statsQuery = createQuery(() => ({
+    queryKey: keys.stats,
+    queryFn: api.stats,
+    enabled: auth.authed
+  }));
+  const stats = $derived(statsQuery.data ?? null);
+
+  const updated = $derived(
+    statsQuery.dataUpdatedAt
+      ? 'Updated ' + new Date(statsQuery.dataUpdatedAt).toLocaleTimeString()
+      : 'Loading…'
+  );
+  const statsLoading = $derived(!stats);
 
   // Latest transaction + last 5 (payments, limit 6).
-  let recent = $state<Payment[]>([]);
-  let recentLoaded = $state(false);
+  const recentParams = { platform: 'all', page: 1, limit: 6 };
+  const recentQuery = createQuery(() => ({
+    queryKey: keys.payments(recentParams),
+    queryFn: () => api.payments(recentParams),
+    enabled: auth.authed
+  }));
+  const recent = $derived(recentQuery.data?.payments ?? []);
+  const recentLoaded = $derived(!recentQuery.isPending);
   let showRecent = $state(false);
-  $effect(() => {
-    if (!auth.authed) return;
-    api.payments({ platform: 'all', page: 1, limit: 6 })
-      .then((r) => (recent = r.payments))
-      .catch(() => {})
-      .finally(() => (recentLoaded = true));
-  });
   const latest = $derived(recent[0]);
 
   function delta(curr: number, prev: number, label: string) {
@@ -31,7 +46,7 @@
   }
 
   const overviewCards = $derived.by(() => {
-    const p = auth.stats?.periods;
+    const p = stats?.periods;
     if (!p) return [];
     return [
       { label: 'Today', count: p.today.count, amount: p.today.amount, delta: delta(p.today.amount, p.yesterday.amount, 'yesterday') },
@@ -42,7 +57,7 @@
   });
 
   const allTimeCards = $derived.by(() => {
-    const s = auth.stats;
+    const s = stats;
     if (!s) return [];
     const by = s.totals.byPlatform || {};
     return [
@@ -53,7 +68,7 @@
 
   // ---- Chart configs ----
   const trendConfig = $derived.by((): ChartConfiguration | null => {
-    const s = auth.stats;
+    const s = stats;
     if (!s) return null;
     return {
       type: 'bar',
@@ -66,7 +81,7 @@
   });
 
   const shareConfig = $derived.by((): ChartConfiguration | null => {
-    const s = auth.stats;
+    const s = stats;
     if (!s) return null;
     const by = s.totals.byPlatform || {};
     return {
@@ -80,7 +95,7 @@
   });
 
   const revenueConfig = $derived.by((): ChartConfiguration | null => {
-    const s = auth.stats;
+    const s = stats;
     if (!s) return null;
     const rev = s.revenue;
     return {
@@ -98,13 +113,13 @@
   });
 
   const revTotal = $derived.by(() => {
-    if (!auth.stats) return '';
-    const sum = (auth.stats.revenue.total || []).reduce((a, b) => a + b, 0);
+    if (!stats) return '';
+    const sum = (stats.revenue.total || []).reduce((a, b) => a + b, 0);
     return taka(sum) + ' in 14 days';
   });
 
   const peakConfig = $derived.by((): ChartConfiguration | null => {
-    const s = auth.stats;
+    const s = stats;
     if (!s) return null;
     return {
       type: 'bar',
@@ -123,7 +138,7 @@
     <div class="sub">{updated}</div>
   </div>
   <div class="head-actions">
-    <button class="btn ghost" onclick={() => auth.refresh()}>Refresh</button>
+    <button class="btn ghost" onclick={() => client.invalidateQueries()}>Refresh</button>
     <button class="btn ghost" onclick={() => auth.logout()}>Sign out</button>
   </div>
 </div>

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { auth } from '$lib/stores/auth.svelte';
-  import { api, type Report } from '$lib/api';
+  import { api } from '$lib/api';
+  import { createQuery } from '@tanstack/svelte-query';
+  import { keys } from '$lib/query';
   import Chart from '$lib/Chart.svelte';
   import Skeleton from '$lib/Skeleton.svelte';
   import SkeletonStat from '$lib/SkeletonStat.svelte';
@@ -8,22 +10,27 @@
   import { COLORS, PLATFORMS, fmtAmount, fmtCount, taka, platformLabel } from '$lib/format';
   import type { ChartConfiguration } from 'chart.js';
 
+  // `from`/`to` back the date inputs; `applied` is the committed range that
+  // actually drives the query (updated on Apply / preset click).
   let from = $state('');
   let to = $state('');
-  let data = $state<Report | null>(null);
-  let loading = $state(false);
+  let applied = $state({ from: '', to: '' });
 
-  async function load() {
-    if (!auth.authed) return;
-    loading = true;
-    try {
-      const r = await api.reports(from || undefined, to || undefined);
-      data = r;
-      from = r.from;
-      to = r.to;
-    } finally {
-      loading = false;
-    }
+  const q = createQuery(() => ({
+    queryKey: keys.reports(applied.from, applied.to),
+    queryFn: () => api.reports(applied.from || undefined, applied.to || undefined),
+    enabled: auth.authed
+  }));
+  const data = $derived(q.data ?? null);
+  const loading = $derived(q.isFetching);
+
+  // Mirror the server-resolved range back into the pickers (initial defaults).
+  $effect(() => {
+    if (q.data) { from = q.data.from; to = q.data.to; }
+  });
+
+  function load() {
+    applied = { from, to };
   }
 
   function setPreset(days: number) {
@@ -34,11 +41,6 @@
     from = f.toISOString().slice(0, 10);
     load();
   }
-
-  // Initial load (defaults to last 30 days server-side).
-  $effect(() => {
-    if (auth.authed && !data) load();
-  });
 
   const chartConfig = $derived.by((): ChartConfiguration | null => {
     if (!data) return null;
