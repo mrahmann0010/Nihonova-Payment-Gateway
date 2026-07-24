@@ -12,8 +12,8 @@
   let recent = $state<Payment[]>([]);
   let showRecent = $state(false);
   $effect(() => {
-    if (!auth.token) return;
-    api.payments(auth.token, { platform: 'all', page: 1, limit: 6 })
+    if (!auth.authed) return;
+    api.payments({ platform: 'all', page: 1, limit: 6 })
       .then((r) => (recent = r.payments))
       .catch(() => {});
   });

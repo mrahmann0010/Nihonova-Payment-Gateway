@@ -6,11 +6,18 @@
 
   let { children } = $props();
 
-  let tokenInput = $state('');
+  let username = $state('');
+  let password = $state('');
   async function signIn(e: Event) {
     e.preventDefault();
-    await auth.login(tokenInput.trim());
+    await auth.login(username.trim(), password);
   }
+
+  // Restore an existing session cookie on first load before deciding what to
+  // render — avoids flashing the login screen for an already-signed-in user.
+  $effect(() => {
+    auth.init();
+  });
 
   const tabs = [
     { href: '/', label: 'Dashboard' },
@@ -29,12 +36,15 @@
   />
 </svelte:head>
 
-{#if !auth.authed}
+{#if !auth.ready}
+  <main class="gate"><p class="muted">Loading…</p></main>
+{:else if !auth.authed}
   <main class="gate">
     <h1>Admin sign-in</h1>
-    <p class="muted">Enter your admin token to continue.</p>
+    <p class="muted">Enter your username and password to continue.</p>
     <form onsubmit={signIn}>
-      <input type="password" placeholder="Admin token" bind:value={tokenInput} autocomplete="off" />
+      <input type="text" placeholder="Username" bind:value={username} autocomplete="username" />
+      <input type="password" placeholder="Password" bind:value={password} autocomplete="current-password" />
       <button class="btn" type="submit" disabled={auth.checking}>
         {auth.checking ? 'Checking…' : 'Sign in'}
       </button>
@@ -50,6 +60,7 @@
         {/each}
       </nav>
 
+      <div class="right">
       <div class="bell-wrap">
         <button class="bell" class:has={alerts.items.length} onclick={() => (alerts.open = !alerts.open)}>
           🔔{#if alerts.items.length}<span class="badge">{alerts.items.length}</span>{/if}
@@ -67,6 +78,9 @@
             <a class="dd-link" href="/health">View pipeline health ›</a>
           </div>
         {/if}
+      </div>
+
+      <button class="logout" onclick={() => auth.logout()} title="Sign out">Sign out</button>
       </div>
     </div>
   </header>
@@ -89,6 +103,13 @@
     color: var(--muted); font-size: 0.9rem; font-weight: 500;
   }
   .tabs a.active { background: var(--panel); color: var(--text); }
+
+  .right { display: flex; align-items: center; gap: 10px; }
+  .logout {
+    background: transparent; border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; cursor: pointer; color: var(--muted); font-size: 0.85rem;
+  }
+  .logout:hover { color: var(--text); border-color: var(--accent); }
 
   .bell-wrap { position: relative; }
   .bell {

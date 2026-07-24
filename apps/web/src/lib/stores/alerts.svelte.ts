@@ -26,9 +26,9 @@ class Alerts {
     this.items = out;
   }
 
-  async load(token: string, stats: Stats | null) {
+  async load(stats: Stats | null) {
     try {
-      const health = await api.health(token);
+      const health = await api.health();
       this.computeFrom(stats, health);
     } catch {
       /* non-fatal — bell just stays empty */

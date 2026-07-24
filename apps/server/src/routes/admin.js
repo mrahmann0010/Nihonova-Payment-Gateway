@@ -21,6 +21,7 @@ const Bkash        = require('../models/Bkash');
 const Nagad        = require('../models/Nagad');
 const Rocket       = require('../models/Rocket');
 const WebhookEvent = require('../models/WebhookEvent');
+const { verify: verifyJwt, COOKIE_NAME } = require('../services/jwt');
 
 const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
 
@@ -57,6 +58,19 @@ function bdDateStringToUTC(dateStr) {
 // Auth middleware for the data API.
 // ---------------------------------------------------------------------------
 function requireAdmin(req, res, next) {
+  // Primary auth: the httpOnly JWT session cookie set at /admin/auth/login.
+  const sessionToken = req.cookies?.[COOKIE_NAME];
+  if (sessionToken) {
+    try {
+      verifyJwt(sessionToken);
+      return next();
+    } catch {
+      // Fall through to the legacy token check below.
+    }
+  }
+
+  // Legacy auth: shared ADMIN_TOKEN via header/query/bearer. Kept for
+  // backward compatibility (e.g. scripts); the dashboard now uses the cookie.
   const secret = process.env.ADMIN_TOKEN;
   const isPlaceholder = !secret || secret === 'your-admin-token-here';
 

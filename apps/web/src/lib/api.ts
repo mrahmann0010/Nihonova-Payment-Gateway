@@ -1,6 +1,8 @@
 // Typed client for the smsServer admin API.
-// The admin token is held in memory (see stores/auth) and attached as the
-// `x-admin-token` header on every request — never persisted to localStorage.
+// Auth is a server-set httpOnly JWT cookie (see stores/auth): the browser
+// attaches it automatically on every credentialed request, so no token is
+// handled in JS. `credentials: 'include'` is required for the cross-origin
+// cookie to be sent.
 
 import { PUBLIC_API_BASE_URL } from '$env/static/public';
 
@@ -14,14 +16,15 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { 'x-admin-token': token, ...(init.headers ?? {}) }
+    credentials: 'include',
+    headers: { ...(init.headers ?? {}) }
   });
-  if (res.status === 401) throw new ApiError(401, 'Invalid or expired token');
+  if (res.status === 401) throw new ApiError(401, 'Not authenticated');
   if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
-  return res.json() as Promise<T>;
+  return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
 }
 
 // ---- Response shapes (mirrors src/routes/admin.js) ----
@@ -81,19 +84,32 @@ export interface Report {
   topSenders: TopSender[];
 }
 
+export interface Session { username: string }
+
 export const api = {
-  stats: (token: string) => request<Stats>('/admin/api/stats', token),
-  health: (token: string) => request<Health>('/admin/api/health', token),
-  payments: (token: string, params: Record<string, string | number> = {}) => {
+  // ---- Auth (cookie session) ----
+  login: (username: string, password: string) =>
+    request<Session>('/admin/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    }),
+  logout: () => request<void>('/admin/auth/logout', { method: 'POST' }),
+  me: () => request<Session>('/admin/auth/me'),
+
+  // ---- Data ----
+  stats: () => request<Stats>('/admin/api/stats'),
+  health: () => request<Health>('/admin/api/health'),
+  payments: (params: Record<string, string | number> = {}) => {
     const qs = new URLSearchParams(
       Object.entries(params).map(([k, v]) => [k, String(v)])
     ).toString();
-    return request<PaymentsPage>(`/admin/api/payments?${qs}`, token);
+    return request<PaymentsPage>(`/admin/api/payments?${qs}`);
   },
-  reports: (token: string, from?: string, to?: string) => {
+  reports: (from?: string, to?: string) => {
     const qs = new URLSearchParams();
     if (from) qs.set('from', from);
     if (to) qs.set('to', to);
-    return request<Report>(`/admin/api/reports?${qs.toString()}`, token);
+    return request<Report>(`/admin/api/reports?${qs.toString()}`);
   }
 };

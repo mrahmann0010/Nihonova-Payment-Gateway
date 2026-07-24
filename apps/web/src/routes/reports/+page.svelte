@@ -11,8 +11,8 @@
   let data = $state<Report | null>(null);
 
   async function load() {
-    if (!auth.token) return;
-    const r = await api.reports(auth.token, from || undefined, to || undefined);
+    if (!auth.authed) return;
+    const r = await api.reports(from || undefined, to || undefined);
     data = r;
     from = r.from;
     to = r.to;
@@ -29,7 +29,7 @@
 
   // Initial load (defaults to last 30 days server-side).
   $effect(() => {
-    if (auth.token && !data) load();
+    if (auth.authed && !data) load();
   });
 
   const chartConfig = $derived.by((): ChartConfiguration | null => {

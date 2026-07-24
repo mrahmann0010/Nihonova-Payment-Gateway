@@ -6,12 +6,12 @@
   let data = $state<Health | null>(null);
 
   async function load() {
-    if (!auth.token) return;
-    data = await api.health(auth.token);
+    if (!auth.authed) return;
+    data = await api.health();
   }
 
   $effect(() => {
-    if (auth.token && !data) load();
+    if (auth.authed && !data) load();
   });
 
   function freshnessStatus(hoursSince: number | null): string {

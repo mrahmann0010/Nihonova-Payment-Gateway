@@ -17,10 +17,10 @@
 
   // Load page 1 for the current platform/search (resets the list).
   async function loadFirst() {
-    if (!auth.token) return;
+    if (!auth.authed) return;
     loading = true;
     try {
-      const r = await api.payments(auth.token, { platform, search, page: 1, limit: LIMIT });
+      const r = await api.payments({ platform, search, page: 1, limit: LIMIT });
       rows = r.payments;
       total = r.total;
       pages = r.pages;
@@ -31,10 +31,10 @@
   }
 
   async function loadMore() {
-    if (loading || currentPage >= pages || !auth.token) return;
+    if (loading || currentPage >= pages || !auth.authed) return;
     loading = true;
     try {
-      const r = await api.payments(auth.token, { platform, search, page: currentPage + 1, limit: LIMIT });
+      const r = await api.payments({ platform, search, page: currentPage + 1, limit: LIMIT });
       rows = [...rows, ...r.payments];
       currentPage = r.page;
       pages = r.pages;
@@ -49,7 +49,7 @@
     // reference reactive deps
     platform;
     search;
-    auth.token;
+    auth.authed;
     clearTimeout(debounce);
     debounce = setTimeout(loadFirst, 300);
     return () => clearTimeout(debounce);

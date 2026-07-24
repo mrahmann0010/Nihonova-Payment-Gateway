@@ -1,10 +1,12 @@
 require('dotenv').config();
 
 const express        = require('express');
+const cookieParser   = require('cookie-parser');
 const connectDB      = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
 const adminRouter    = require('./routes/admin');
+const authRouter     = require('./routes/auth');
 
 if (!process.env.MONGO_URI) {
   console.error('[Config] MONGO_URI is not set. Server cannot start without a database connection.');
@@ -24,7 +26,10 @@ const CORS_ORIGINS = (process.env.CORS_ORIGIN || '*')
 app.use((req, res, next) => {
   const origin = req.get('origin');
   if (origin && (CORS_ORIGINS.includes('*') || CORS_ORIGINS.includes(origin))) {
-    res.set('Access-Control-Allow-Origin', CORS_ORIGINS.includes('*') ? '*' : origin);
+    // Cookie auth requires credentialed CORS, which forbids a '*' origin — the
+    // exact request origin must be echoed back instead.
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Credentials', 'true');
     res.set('Vary', 'Origin');
   }
   res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -32,6 +37,8 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
+
+app.use(cookieParser());
 
 app.use(
   express.json({
@@ -59,6 +66,8 @@ app.get('/favicon.ico', (_req, res) => res.status(204).end());
 app.get('/', (_req, res) => res.json({ service: 'smsServer', status: 'ok' }));
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
+app.use('/admin/auth', authRouter);
 
 app.use('/admin', adminRouter);
 
