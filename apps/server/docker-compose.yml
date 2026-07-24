@@ -1,0 +1,37 @@
+# Runs the API together with a MongoDB instance on a VPS.
+# Copy .env.example to .env and fill in secrets before `docker compose up -d`.
+# If you use a managed database (Atlas, etc.), delete the `mongo` service and the
+# `depends_on` block, and point MONGO_URI at your managed connection string.
+
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017/bkash-payments}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      BKASH_SENDER: ${BKASH_SENDER:-bKash}
+      NAGAD_SENDER: ${NAGAD_SENDER:-NAGAD}
+      ROCKET_SENDER: ${ROCKET_SENDER:-Rocket}
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mongo-data:
