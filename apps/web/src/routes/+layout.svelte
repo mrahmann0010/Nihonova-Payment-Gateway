@@ -118,15 +118,21 @@
   .err { color: #f87171; margin-top: 10px; }
 
   .topbar { border-bottom: 1px solid var(--border); background: var(--panel-2); }
-  .bar-inner { display: flex; justify-content: space-between; align-items: center; height: 56px; }
-  .tabs { display: flex; gap: 4px; }
+  .bar-inner { display: flex; justify-content: space-between; align-items: center; gap: 8px; height: 56px; }
+  /* Tabs are the only flexible part of the bar: they shrink and scroll instead
+     of pushing the bell/sign-out off a narrow screen. */
+  .tabs {
+    display: flex; gap: 4px; min-width: 0; flex: 1;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
   .tabs a {
-    padding: 8px 14px; border-radius: 8px; text-decoration: none;
+    padding: 8px 14px; border-radius: 8px; text-decoration: none; white-space: nowrap;
     color: var(--muted); font-size: 0.9rem; font-weight: 500;
   }
   .tabs a.active { background: var(--panel); color: var(--text); }
 
-  .right { display: flex; align-items: center; gap: 10px; }
+  .right { display: flex; align-items: center; gap: 10px; flex: none; }
   .logout {
     background: transparent; border: 1px solid var(--border); border-radius: 8px;
     padding: 6px 12px; cursor: pointer; color: var(--muted); font-size: 0.85rem;
@@ -154,4 +160,12 @@
   .dd-item.down { background: rgba(248,113,113,0.12); color: #fca5a5; }
   .dd-item.warn { background: rgba(251,191,36,0.12); color: #fcd34d; }
   .dd-link { display: block; padding: 8px 6px 2px; color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+
+  @media (max-width: 560px) {
+    .tabs a { padding: 8px 10px; font-size: 0.85rem; }
+    .right { gap: 6px; }
+    .logout { padding: 6px 9px; }
+    /* Keep the dropdown inside the viewport on small screens. */
+    .dropdown { width: min(300px, calc(100vw - 24px)); right: -8px; }
+  }
 </style>
