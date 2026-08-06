@@ -1,25 +1,64 @@
-// Establishes and caches the Mongoose connection.
-// Called once at startup (see server.js); the readyState guard also makes it a
-// safe no-op if invoked again, so callers never open a second connection.
+// Establishes the single Mongoose connection for the process.
+//
+// This is a long-running server, so connect() is called exactly once from
+// server.js before the listener opens. The driver owns reconnection after that
+// — nothing in the request path should ever call this.
 
 const mongoose = require('mongoose');
+const log      = require('../services/logger');
+
+// Explicit pool/timeout settings. The defaults are tuned for a generic client,
+// not a small always-on API: maxPoolSize 100 is far more than this workload
+// needs (and burns connections on a shared cluster), and the 30s server
+// selection timeout means every request hangs half a minute while Mongo is
+// unreachable instead of failing fast enough to be retried.
+const CONNECT_OPTIONS = {
+  maxPoolSize: 20,
+  minPoolSize: 2,
+  serverSelectionTimeoutMS: 5_000,
+  socketTimeoutMS: 45_000,
+  // Cap how long a query may sit queued during a reconnect. Buffering is kept
+  // (a brief blip shouldn't fail a webhook) but bounded well under the
+  // gateway's patience.
+  bufferTimeoutMS: 5_000,
+};
+
+// Dedupes concurrent callers during the initial connect so a burst can never
+// start two attempts.
+let connecting = null;
 
 async function connectDB() {
-  // readyState 1 = connected, 2 = connecting (Mongoose will resolve it)
-  if (mongoose.connection.readyState >= 1) return;
-  await mongoose.connect(process.env.MONGO_URI);
+  // 1 = connected. States 2 (connecting) and 3 (disconnecting) must NOT be
+  // treated as ready — returning early on 2 hands back a connection that isn't
+  // usable yet, and on 3 one that's being torn down.
+  if (mongoose.connection.readyState === 1) return;
+
+  if (!connecting) {
+    connecting = mongoose.connect(process.env.MONGO_URI, CONNECT_OPTIONS).finally(() => {
+      connecting = null;
+    });
+  }
+
+  await connecting;
+}
+
+// True only when queries can actually be served right now.
+function isDbReady() {
+  return mongoose.connection.readyState === 1;
 }
 
 mongoose.connection.on('connected', () => {
-  console.log('[DB] MongoDB connected:', mongoose.connection.host);
+  log.info('DB', 'connected', { host: mongoose.connection.host });
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.warn('[DB] MongoDB disconnected');
+  log.warn('DB', 'disconnect');
 });
 
 mongoose.connection.on('error', (err) => {
-  console.error('[DB] MongoDB error:', err.message);
+  log.error('DB', 'error', { error: err.message });
 });
 
 module.exports = connectDB;
+module.exports.connectDB = connectDB;
+module.exports.isDbReady = isDbReady;

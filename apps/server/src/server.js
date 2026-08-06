@@ -7,6 +7,7 @@ require('dotenv').config();
 const mongoose  = require('mongoose');
 const app       = require('./app');
 const connectDB = require('./config/db');
+const log       = require('./services/logger');
 
 const PORT = process.env.PORT || 3000;
 
@@ -14,14 +15,14 @@ async function start() {
   await connectDB();
 
   const server = app.listen(PORT, () => {
-    console.log(`[Server] Listening on port ${PORT}`);
+    log.info('SERVER', 'listening', { port: PORT, env: process.env.NODE_ENV || 'development' });
   });
 
   async function shutdown(signal) {
-    console.log(`[Server] ${signal} received — shutting down`);
+    log.info('SERVER', 'shutdown', { signal });
     server.close(async () => {
       await mongoose.connection.close();
-      console.log('[Server] Closed cleanly');
+      log.info('SERVER', 'stopped', { clean: true });
       process.exit(0);
     });
     // Force-exit if graceful shutdown hangs.
@@ -30,9 +31,22 @@ async function start() {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // Node exits on an unhandled rejection, and the container policy restarts us —
+  // so a recurring bug becomes a silent crash loop that drops every inbound SMS.
+  // Log loudly with the full stack first, then let the restart happen.
+  function fatal(kind, err) {
+    log.error('SERVER', 'fatal', { kind, error: err instanceof Error ? err.message : String(err) });
+    if (err instanceof Error) console.error(err.stack);
+    server.close(() => process.exit(1));
+    setTimeout(() => process.exit(1), 5_000).unref();
+  }
+
+  process.on('unhandledRejection', (reason) => fatal('Unhandled rejection', reason));
+  process.on('uncaughtException', (err) => fatal('Uncaught exception', err));
 }
 
 start().catch((err) => {
-  console.error('[Server] Failed to start:', err.message);
+  log.error('SERVER', 'startfail', { error: err.message });
   process.exit(1);
 });

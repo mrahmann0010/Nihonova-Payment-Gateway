@@ -3,14 +3,15 @@ require('dotenv').config();
 const express        = require('express');
 const compression    = require('compression');
 const cookieParser   = require('cookie-parser');
-const connectDB      = require('./config/db');
+const { isDbReady }  = require('./config/db');
 const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
 const adminRouter    = require('./routes/admin');
 const authRouter     = require('./routes/auth');
+const log            = require('./services/logger');
 
 if (!process.env.MONGO_URI) {
-  console.error('[Config] MONGO_URI is not set. Server cannot start without a database connection.');
+  log.error('CONFIG', 'nomongo', { note: 'MONGO_URI is not set — cannot start' });
   process.exit(1);
 }
 
@@ -53,16 +54,14 @@ app.use(
   })
 );
 
-// Ensure a DB connection exists before any route handler runs.
-// connectDB() is a no-op when already connected, so this is fast on warm instances.
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error('[DB] Connection failed:', err.message);
-    res.status(503).json({ error: 'Service unavailable' });
-  }
+// Health check — registered *above* the readiness gate so it can still report
+// while the DB is down. Without the DB every webhook and admin route 503s, so a
+// healthy answer here would hide a fully broken container from the orchestrator.
+app.get('/health', (_req, res) => {
+  const ready = isDbReady();
+  res
+    .status(ready ? 200 : 503)
+    .json({ status: ready ? 'ok' : 'degraded', db: ready ? 'connected' : 'disconnected' });
 });
 
 app.get('/favicon.ico', (_req, res) => res.status(204).end());
@@ -70,7 +69,16 @@ app.get('/favicon.ico', (_req, res) => res.status(204).end());
 // API root — the UI now lives in the separate SvelteKit frontend.
 app.get('/', (_req, res) => res.json({ service: 'smsServer', status: 'ok' }));
 
-app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+// Readiness gate for the data routes. The connection is opened once at startup
+// and maintained by the driver, so this only *checks* state — it never dials.
+// Refusing early with a 503 keeps a disconnect from turning into a query that
+// sits buffered and then surfaces as an opaque 500; the SMS gateway retries a
+// 503, so a blip costs a redelivery rather than a lost payment.
+app.use((req, res, next) => {
+  if (isDbReady()) return next();
+  log.warn('DB', 'notready', { path: req.path });
+  res.status(503).json({ error: 'Service unavailable' });
+});
 
 app.use('/admin/auth', authRouter);
 
@@ -86,7 +94,7 @@ app.use((_req, res) => {
 // Global error handler — catches anything thrown by route handlers
 // eslint-disable-next-line no-unused-vars
 app.use((err, _req, res, _next) => {
-  console.error('[App] Unhandled error:', err.message);
+  log.error('APP', 'unhandled', { error: err.message });
   res.status(500).json({ error: 'Internal server error' });
 });
 

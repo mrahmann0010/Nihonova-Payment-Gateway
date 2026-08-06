@@ -244,9 +244,13 @@ router.get('/api/payments', requireAdmin, async (req, res, next) => {
 router.get('/api/stats', requireAdmin, async (_req, res, next) => {
   try {
     const DAYS = 14;
-    const since = new Date();
-    since.setUTCHours(0, 0, 0, 0);
-    since.setUTCDate(since.getUTCDate() - (DAYS - 1));
+    // The window must start at BD midnight, because the $group below buckets in
+    // +06:00. A UTC-midnight start is six hours late: it clips the oldest day's
+    // 00:00–06:00 BD transactions, and between BD midnight and 6am the current
+    // BD day falls past the end of the window entirely — so "Today" reports
+    // yesterday and that night's payments land in no label at all.
+    const todayBD = bdNow().toISOString().slice(0, 10);
+    const since = new Date(bdDateStringToUTC(todayBD).getTime() - (DAYS - 1) * 24 * 60 * 60 * 1000);
 
     const perPlatform = await Promise.all(
       Object.entries(MODELS).map(async ([name, Model]) => {
@@ -278,7 +282,7 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
     const labels = [];
     const cursor = new Date(since);
     for (let i = 0; i < DAYS; i++) {
-      const bd = new Date(cursor.getTime() + 6 * 60 * 60 * 1000);
+      const bd = new Date(cursor.getTime() + BD_OFFSET_MS);
       labels.push(bd.toISOString().slice(0, 10));
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
