@@ -18,6 +18,7 @@
 const express      = require('express');
 const router       = express.Router();
 const parsePayment = require('../services/parsePayment');
+const log          = require('../services/logger');
 
 const Bkash        = require('../models/Bkash');
 const Nagad        = require('../models/Nagad');
@@ -35,7 +36,7 @@ const MODELS = {
 // webhook response, so a logging hiccup can't turn into a dropped payment.
 function logEvent(reason, fields) {
   WebhookEvent.create({ reason, ...fields }).catch((err) => {
-    console.error('[Webhook] Failed to record ingestion event:', err.message);
+    log.error('WEBHOOK', 'log_fail', { error: err.message });
   });
 }
 
@@ -58,7 +59,7 @@ router.post('/sms', async (req, res) => {
 
   const senderLower = (sender || '').toLowerCase();
   if (knownSenders.length > 0 && !knownSenders.includes(senderLower)) {
-    console.log(`[Webhook] Ignored unknown sender: "${sender}"`);
+    log.warn('WEBHOOK', 'unknown', { from: sender || '?' });
     logEvent('unknown_sender', { sender });
     return res.status(200).json({ received: true, processed: false });
   }
@@ -67,7 +68,7 @@ router.post('/sms', async (req, res) => {
   const parsed = parsePayment(text || '');
 
   if (!parsed) {
-    console.warn(`[Webhook] Unmatched SMS from "${sender}" — not stored (no known payment pattern)`);
+    log.warn('WEBHOOK', 'unmatched', { from: sender || '?', len: (text || '').length });
     logEvent('unmatched', { sender, rawMessage: (text || '').slice(0, 300) });
     return res.status(200).json({ received: true, processed: false, reason: 'unmatched' });
   }
@@ -75,7 +76,7 @@ router.post('/sms', async (req, res) => {
   const Model = MODELS[parsed.platform];
   if (!Model) {
     // Defensive — should never happen since parsePayment only emits known platforms.
-    console.error(`[Webhook] No model for platform "${parsed.platform}"`);
+    log.error('WEBHOOK', 'no_model', { platform: parsed.platform, trx: parsed.trxId });
     return res.status(200).json({ received: true, processed: false, reason: 'unknown_platform' });
   }
 
@@ -97,9 +98,15 @@ router.post('/sms', async (req, res) => {
 
     await doc.save();
 
-    console.log(
-      `[Webhook] Saved ${parsed.platform} — trxId: ${parsed.trxId}, amount: ${parsed.amount}, sender: ${doc.sender}`
-    );
+    log.info('WEBHOOK', 'saved', {
+      platform: parsed.platform,
+      amount:   parsed.amount,
+      trx:      parsed.trxId,
+      from:     doc.sender,
+      sim:      simNumber,
+      at:       parsed.rawTime,
+      fee:      parsed.fee || null,
+    });
 
     return res.status(200).json({
       received: true,
@@ -111,12 +118,23 @@ router.post('/sms', async (req, res) => {
     // Duplicate trxId — already stored from a previous delivery attempt.
     // Return 200 so the gateway stops retrying.
     if (err.code === 11000) {
-      console.log(`[Webhook] Duplicate trxId ignored — ${parsed.platform}/${parsed.trxId}`);
+      log.warn('WEBHOOK', 'duplicate', {
+        platform: parsed.platform,
+        amount:   parsed.amount,
+        trx:      parsed.trxId,
+        from:     parsed.sender || sender,
+      });
       logEvent('duplicate', { platform: parsed.platform, sender: parsed.sender || sender });
       return res.status(200).json({ received: true, processed: false, reason: 'duplicate' });
     }
 
-    console.error('[Webhook] Unexpected error:', err.message);
+    log.error('WEBHOOK', 'error', {
+      platform: parsed.platform,
+      amount:   parsed.amount,
+      trx:      parsed.trxId,
+      from:     parsed.sender || sender,
+      error:    err.message,
+    });
     logEvent('error', { platform: parsed.platform, sender: parsed.sender || sender, error: err.message });
     return res.status(500).json({ error: 'Internal server error' });
   }

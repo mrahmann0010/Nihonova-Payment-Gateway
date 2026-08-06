@@ -9,6 +9,7 @@
 // Uses crypto.timingSafeEqual to prevent timing attacks.
 
 const crypto = require('crypto');
+const log    = require('../services/logger');
 
 function verifySignature(req, res, next) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -18,17 +19,17 @@ function verifySignature(req, res, next) {
   const isPlaceholder = !secret || secret === 'your-shared-secret-here';
   if (isPlaceholder) {
     if (process.env.NODE_ENV === 'production') {
-      console.error('[Auth] WEBHOOK_SECRET not configured in production — rejecting request');
+      log.error('AUTH', 'nosecret', { note: 'WEBHOOK_SECRET unset in production' });
       return res.status(503).json({ error: 'Server misconfigured' });
     }
-    console.warn('[Auth] WEBHOOK_SECRET not configured — auth disabled (dev only)');
+    log.warn('AUTH', 'nosecret', { note: 'auth disabled (dev only)' });
     return next();
   }
 
   const token = req.query.token;
 
   if (!token) {
-    console.warn('[Auth] Missing ?token query parameter');
+    log.warn('AUTH', 'notoken', { ip: req.ip });
     return res.status(401).json({ error: 'Missing token' });
   }
 
@@ -39,7 +40,7 @@ function verifySignature(req, res, next) {
     expected.length !== received.length ||
     !crypto.timingSafeEqual(expected, received)
   ) {
-    console.warn('[Auth] Invalid token — request rejected');
+    log.warn('AUTH', 'badtoken', { ip: req.ip });
     return res.status(401).json({ error: 'Invalid token' });
   }
 
