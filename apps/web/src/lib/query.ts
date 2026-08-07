@@ -35,7 +35,8 @@ export function createQueryClient() {
   // Any query that 401s means the cookie is gone — sign the user out globally.
   client.getQueryCache().subscribe((event) => {
     const err = event.query.state.error;
-    if (err instanceof ApiError && err.status === 401 && auth.authed) auth.logout();
+    if (err instanceof ApiError && err.status === 401 && auth.authed)
+      auth.logout({ expired: true });
   });
 
   return client;

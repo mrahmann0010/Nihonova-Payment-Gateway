@@ -1,39 +1,67 @@
-// Shared Chart.js option builders for the dark dashboard theme.
+// Shared Chart.js option builders, themed to the design system's light surfaces.
+// The x-axis is deliberately unlabelled: ChartPanel renders the sparse mono
+// axis strip below the plot instead, so the chart body stays clean.
 import type { ChartOptions, ChartType } from 'chart.js';
 
-const TICK = '#5C6A86';
-const GRID = '#18233D';
-const LEGEND = '#94A2BE';
+const TICK = '#C0BAAD'; // ink-dim
+const GRID = '#EFEBE3'; // line-soft
+const INK = '#1A1A18';
+const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
 export function baseOptions<T extends ChartType = 'bar'>(): ChartOptions<T> {
   return {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { labels: { color: LEGEND, font: { size: 11 }, usePointStyle: true, boxWidth: 7 } }
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: INK,
+        padding: 10,
+        cornerRadius: 9,
+        titleFont: { family: MONO, size: 11 },
+        bodyFont: { family: MONO, size: 12 },
+        displayColors: true,
+        boxWidth: 8,
+        boxHeight: 8,
+        usePointStyle: true
+      }
     }
   } as ChartOptions<T>;
 }
 
-export function stackedBarScales(yCallback?: (v: number | string) => string) {
+function yAxis(callback?: (v: number | string) => string) {
   return {
-    x: { stacked: true, grid: { display: false }, ticks: { color: TICK, font: { size: 10 } } },
-    y: {
-      stacked: true,
-      beginAtZero: true,
-      grid: { color: GRID },
-      ticks: {
-        color: TICK,
-        font: { size: 10 },
-        ...(yCallback ? { callback: yCallback } : { precision: 0 })
-      }
+    beginAtZero: true,
+    border: { display: false },
+    grid: { color: GRID, drawTicks: false },
+    ticks: {
+      color: TICK,
+      font: { family: MONO, size: 10 },
+      padding: 8,
+      maxTicksLimit: 5,
+      ...(callback ? { callback } : { precision: 0 })
     }
   };
 }
 
+const xAxis = {
+  stacked: true,
+  border: { display: false },
+  grid: { display: false },
+  ticks: { display: false }
+};
+
+export function stackedBarScales(yCallback?: (v: number | string) => string) {
+  return { x: xAxis, y: { ...yAxis(yCallback), stacked: true } };
+}
+
 export function plainBarScales() {
-  return {
-    x: { grid: { display: false }, ticks: { color: TICK, font: { size: 10 } } },
-    y: { beginAtZero: true, grid: { color: GRID }, ticks: { color: TICK, precision: 0, font: { size: 10 } } }
-  };
+  return { x: { ...xAxis, stacked: false }, y: yAxis() };
+}
+
+/** Sparse mono labels for ChartPanel's axis strip: first, two interior, last. */
+export function axisStrip(labels: string[], picks = 4): string[] {
+  if (labels.length <= picks) return labels;
+  const step = (labels.length - 1) / (picks - 1);
+  return Array.from({ length: picks }, (_, i) => labels[Math.round(i * step)]);
 }

@@ -50,14 +50,7 @@
   onDestroy(() => chart?.destroy());
 </script>
 
-<div class="canvas-box">
+<!-- Fills its container: the plot height is owned by ChartPanel. -->
+<div class="relative h-full w-full">
   <canvas bind:this={canvas}></canvas>
 </div>
-
-<style>
-  .canvas-box {
-    position: relative;
-    height: 280px;
-    width: 100%;
-  }
-</style>

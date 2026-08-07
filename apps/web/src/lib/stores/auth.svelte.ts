@@ -12,6 +12,9 @@ class Auth {
   checking = $state(false);
   ready = $state(false); // true once the initial session probe has finished
   error = $state('');
+  // Set when the cookie dropped under us rather than the user signing out, so
+  // the sign-in screen can explain why they're back there.
+  expired = $state(false);
 
   // Restore an existing session on app load — one cheap /me call. Runs before
   // the login screen is shown so a returning user never re-enters credentials.
@@ -34,6 +37,7 @@ class Auth {
       const session = await api.login(username, password);
       this.username = session.username;
       this.authed = true;
+      this.expired = false;
     } catch (e) {
       this.error = e instanceof ApiError ? e.message : 'Login failed';
       this.authed = false;
@@ -42,7 +46,7 @@ class Auth {
     }
   }
 
-  async logout() {
+  async logout({ expired = false } = {}) {
     try {
       await api.logout();
     } catch {
@@ -51,6 +55,7 @@ class Auth {
     this.username = '';
     this.authed = false;
     this.error = '';
+    this.expired = expired;
   }
 }
 

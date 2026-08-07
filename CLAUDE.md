@@ -67,6 +67,30 @@ fetches. Read `apps/web/src/lib/query.ts` first.
   client explicitly as the second accessor arg (they live outside the provider's child context).
 - Transactions list uses `createInfiniteQuery` and de-dupes flattened pages by `platform+trxId`.
 
+## Styling — Tailwind v4 + the Nihonova design system
+
+- **Tailwind v4** via `@tailwindcss/vite`. There is no `tailwind.config.js`: all tokens live in the
+  `@theme` block of `apps/web/src/lib/app.css`, so classes read `bg-panel`, `text-ink-mid`,
+  `border-line`, `text-money`, `rounded-panel`, `shadow-lifted` — never raw hex.
+- `app.css` holds **globals only**: font imports, `@theme` tokens, base resets, `body`, default `a`
+  colors, the `shimmer`/`indet`/`spin` keyframes, and the `.mono` helper. Nothing else. There are no
+  `<style>` blocks in any `.svelte` file and no per-component CSS.
+- Everything component- and page-level is Tailwind utilities on the element. Repeated visuals live
+  in `apps/web/src/lib/components/` (`Button`, `Input`, `Panel`, `StatCard`, `PlatformPill`,
+  `StatusBadge`, `Modal`, `Toast`, `Skeleton`, `EmptyState`, `ErrorState`, `LoadError`, …) — reuse
+  those rather than re-typing utility strings.
+- **Mono everywhere it matters:** every identifier, phone number, timestamp, count and taka amount
+  gets `.mono` (JetBrains Mono, tabular figures) so admins can compare against student screenshots.
+  Format them through `$lib/format` (`money`, `taka`, `fmtDateTime`, `fmtAgo`, `fmtAgeShort`).
+- **Empty ≠ broken.** `EmptyState` is the neutral gray "nothing here yet"; `ErrorState` is the red
+  "the forwarder stopped"; `LoadError` is the neutral panel boundary for a failed request. Never
+  render one in place of another.
+- Platform brand colors (`bkash`/`nagad`/`rocket`) are fixed and never re-mapped — including in
+  chart series, which pull them from `COLORS` in `$lib/format`.
+- Charts: Chart.js draws no x-axis labels; `ChartPanel` renders the sparse mono axis strip beneath
+  the plot instead (`axisStrip()` in `chartOpts.ts`). Plot heights are 230px (daily) / 170px (peak).
+- The desktop ledger collapses to stacked cards below the custom `tab:` breakpoint (720px).
+
 ## Typed API client
 
 `apps/web/src/lib/api.ts` is the single typed client for the server. When you add or change a
