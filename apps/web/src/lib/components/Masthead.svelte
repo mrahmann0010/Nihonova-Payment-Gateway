@@ -4,7 +4,7 @@
   import Logo from './Logo.svelte';
 
   const tabs = [
-    { href: '/', label: 'Dashboard' },
+    { href: '/dashboard', label: 'Dashboard' },
     { href: '/transactions', label: 'Transactions' },
     { href: '/reports', label: 'Reports' },
     { href: '/health', label: 'Health' }
