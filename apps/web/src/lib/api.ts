@@ -52,10 +52,11 @@ export interface Payment {
 }
 export interface PaymentsPage {
   payments: Payment[];
-  total: number;
-  page: number;
+  // Only computed for the first page (no cursor); null on later pages.
+  total: number | null;
   limit: number;
-  pages: number;
+  // Pass back as `cursor` to get the next page; null on the last page.
+  nextCursor: string | null;
 }
 
 export interface Freshness { name: string; lastReceivedAt: string | null; hoursSince: number | null }

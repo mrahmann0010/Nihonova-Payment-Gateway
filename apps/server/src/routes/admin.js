@@ -13,15 +13,17 @@
 //   webhook auth: if ADMIN_TOKEN is unset, access is allowed in dev but
 //   refused in production.
 
-const crypto  = require('crypto');
-const express = require('express');
-const router  = express.Router();
+const crypto    = require('crypto');
+const express   = require('express');
+const { Types } = require('mongoose');
+const router    = express.Router();
 
 const Bkash        = require('../models/Bkash');
 const Nagad        = require('../models/Nagad');
 const Rocket       = require('../models/Rocket');
 const WebhookEvent = require('../models/WebhookEvent');
 const { verify: verifyJwt, COOKIE_NAME } = require('../services/jwt');
+const { getAllTimeTotals } = require('../services/totalsCache');
 
 const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
 
@@ -122,63 +124,124 @@ function serialize(doc, platform) {
   };
 }
 
-// Build a case-insensitive search filter over trxId + sender.
+function badRequest(message) {
+  const e = new Error(message);
+  e.status = 400;
+  return e;
+}
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Search filter over trxId + sender. Both match as anchored, case-sensitive
+// prefixes so Mongo walks index bounds — an unanchored or /i regex can't use an
+// index and reads every row. TrxIDs are stored uppercase, and phone input is
+// normalised to the way senders are stored.
 function searchFilter(search) {
   if (!search) return {};
-  const safe = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const rx = new RegExp(safe, 'i');
-  return { $or: [{ trxId: rx }, { sender: rx }] };
+  const senderPrefixes = new Set([search]);
+  // "+8801712…" / "8801712…" → stored "01712…"
+  const local = search.replace(/^\+?88(?=0)/, '');
+  senderPrefixes.add(local);
+  // "1712…" typed without the leading zero.
+  if (/^1\d+$/.test(local)) senderPrefixes.add(`0${local}`);
+  // Rocket senders are masked ("***515"), so bare digits also match that tail.
+  if (/^\d+$/.test(local)) senderPrefixes.add(`***${local}`);
+  return {
+    $or: [
+      { trxId: new RegExp(`^${escapeRegex(search.toUpperCase())}`) },
+      ...[...senderPrefixes].map((p) => ({ sender: new RegExp(`^${escapeRegex(p)}`) })),
+    ],
+  };
 }
 
-// Fetch a paginated, filterable page of payments across one or all platforms.
-// Shared by the JSON API and the htmx partial so both stay in lock-step.
-async function fetchPayments({ platform, page, limit, search }) {
-  const query = searchFilter(search);
-
-  // Single platform — page directly in the database.
-  if (platform !== 'all') {
-    const Model = MODELS[platform];
-    if (!Model) { const e = new Error('Unknown platform'); e.status = 400; throw e; }
-
-    const [docs, total] = await Promise.all([
-      Model.find(query).select(LIST_FIELDS).sort({ dateReceived: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-      Model.countDocuments(query),
-    ]);
-    return { payments: docs.map((d) => serialize(d, platform)), total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
-  }
-
-  // All platforms — fetch the top (page*limit) from each collection, merge,
-  // sort by time, then slice the requested page.
-  const windowSize = page * limit;
-  const results = await Promise.all(
-    Object.entries(MODELS).map(async ([name, Model]) => {
-      const [docs, count] = await Promise.all([
-        Model.find(query).select(LIST_FIELDS).sort({ dateReceived: -1 }).limit(windowSize).lean(),
-        Model.countDocuments(query),
-      ]);
-      return { name, docs, count };
-    })
-  );
-
-  let total = 0;
-  const merged = [];
-  for (const r of results) {
-    total += r.count;
-    for (const d of r.docs) merged.push(serialize(d, r.name));
-  }
-  merged.sort((a, b) => new Date(b.dateReceived) - new Date(a.dateReceived));
-  const payments = merged.slice((page - 1) * limit, (page - 1) * limit + limit);
-  return { payments, total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) };
+// Newest first, with _id as tie-break — several payments can share one SMS
+// timestamp, and the keyset cursor needs a strict total order.
+const PAGE_SORT = { dateReceived: -1, _id: -1 };
+function byNewest(a, b) {
+  return (b.dateReceived - a.dateReceived) || (String(b._id) > String(a._id) ? 1 : -1);
 }
 
-// Normalise the list query params shared by the API + partial routes.
+const encodeCursor = (doc) => `${doc.dateReceived.toISOString()}_${doc._id}`;
+
+function decodeCursor(raw) {
+  if (!raw) return null;
+  const [iso, id] = String(raw).split('_');
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime()) || !/^[0-9a-f]{24}$/i.test(id || '')) {
+    throw badRequest('Invalid cursor');
+  }
+  return { date, id: new Types.ObjectId(id) };
+}
+
+function pageFilter(search, cursor) {
+  const clauses = [];
+  if (search) clauses.push(searchFilter(search));
+  if (cursor) {
+    clauses.push({
+      $or: [
+        { dateReceived: { $lt: cursor.date } },
+        { dateReceived: cursor.date, _id: { $lt: cursor.id } },
+      ],
+    });
+  }
+  return clauses.length > 1 ? { $and: clauses } : (clauses[0] || {});
+}
+
+// Fetch one page of payments across one or all platforms.
+//
+// Keyset paging: each collection returns at most limit+1 rows older than the
+// cursor, so a page costs the same however deep the admin scrolls (skip/offset
+// re-reads every earlier row, and the infinite list refetches every loaded
+// page on focus). The extra row tells us whether another page exists.
+async function fetchPayments({ platform, limit, search, cursor }) {
+  const entries = platform === 'all' ? Object.entries(MODELS) : [[platform, MODELS[platform]]];
+  if (!entries[0][1]) throw badRequest('Unknown platform');
+
+  const filter = pageFilter(search, cursor);
+  const [results, counts] = await Promise.all([
+    Promise.all(entries.map(async ([name, Model]) => {
+      const docs = await Model.find(filter).select(LIST_FIELDS).sort(PAGE_SORT).limit(limit + 1).lean();
+      return docs.map((doc) => ({ name, doc }));
+    })),
+    // The record count is only displayed once, so only the first page pays for
+    // it — and without a search it comes from collection metadata, not a scan.
+    cursor ? null : Promise.all(entries.map(([, Model]) =>
+      search ? Model.countDocuments(searchFilter(search)) : Model.estimatedDocumentCount()
+    )),
+  ]);
+
+  const merged = results.flat().sort((a, b) => byNewest(a.doc, b.doc));
+  const rows = merged.slice(0, limit);
+  return {
+    payments: rows.map((r) => serialize(r.doc, r.name)),
+    total: counts ? counts.reduce((sum, n) => sum + n, 0) : null,
+    limit,
+    nextCursor: merged.length > limit ? encodeCursor(rows[rows.length - 1].doc) : null,
+  };
+}
+
+// Normalise the list query params.
 function listParams(req) {
   return {
     platform: String(req.query.platform || 'all').toLowerCase(),
-    page:  Math.max(1, parseInt(req.query.page, 10) || 1),
     limit: Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25)),
     search: (req.query.search || '').trim(),
+    cursor: decodeCursor(req.query.cursor),
   };
+}
+
+// All-time per-platform totals. Unlike every other stat these have no date
+// bound, so they scan every payment — which is why they go through totalsCache.
+async function computeAllTimeTotals() {
+  const rows = await Promise.all(
+    Object.entries(MODELS).map(async ([name, Model]) => {
+      const [t] = await Model.aggregate([
+        { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
+      ]);
+      return [name, { count: t?.count ?? 0, amount: t?.amount ?? 0 }];
+    })
+  );
+  return Object.fromEntries(rows);
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +289,8 @@ router.get('/api/health', requireAdmin, async (_req, res, next) => {
 
 // ---------------------------------------------------------------------------
 // GET /admin/api/payments
-//   ?platform=all|bkash|nagad|rocket  &page=1  &limit=25  &search=
+//   ?platform=all|bkash|nagad|rocket  &limit=25  &search=  &cursor=
+//   `cursor` is the previous page's `nextCursor`; omit it for the first page.
 // ---------------------------------------------------------------------------
 router.get('/api/payments', requireAdmin, async (req, res, next) => {
   try {
@@ -252,31 +316,70 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
     const todayBD = bdNow().toISOString().slice(0, 10);
     const since = new Date(bdDateStringToUTC(todayBD).getTime() - (DAYS - 1) * 24 * 60 * 60 * 1000);
 
-    const perPlatform = await Promise.all(
-      Object.entries(MODELS).map(async ([name, Model]) => {
-        const [totalsAgg, dailyAgg] = await Promise.all([
-          Model.aggregate([
-            { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
-          ]),
-          Model.aggregate([
-            { $match: { dateReceived: { $gte: since } } },
+    // Month-to-date vs the same elapsed window last month (so day 3 of a
+    // month doesn't compare against a full prior month and look like a drop).
+    const now = new Date();
+    const nowBD = bdNow();
+    const thisMonthStart = bdMonthStartUTC(nowBD, 0);
+    const lastMonthStart = bdMonthStartUTC(nowBD, -1);
+    const lastMonthComparableEnd = new Date(lastMonthStart.getTime() + (now - thisMonthStart));
+
+    // Peak hours — transaction count by BD hour-of-day, last 30 days.
+    const PEAK_DAYS = 30;
+    const peakSince = new Date(now.getTime() - PEAK_DAYS * 24 * 60 * 60 * 1000);
+
+    // Every windowed figure reads at most the last ~two months, so each
+    // collection does one indexed range scan and $facet splits those rows into
+    // the daily, month and peak-hour views (instead of four separate queries).
+    const earliest = new Date(Math.min(since, lastMonthStart, peakSince));
+    const sumGroup = { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } };
+    const EMPTY = { count: 0, amount: 0 };
+
+    const [allTime, perPlatform] = await Promise.all([
+      getAllTimeTotals(computeAllTimeTotals),
+      Promise.all(
+        Object.entries(MODELS).map(async ([name, Model]) => {
+          const [f] = await Model.aggregate([
+            { $match: { dateReceived: { $gte: earliest } } },
             {
-              $group: {
-                _id: { $dateToString: { format: '%Y-%m-%d', date: '$dateReceived', timezone: BD_TZ } },
-                count: { $sum: 1 },
-                amount: { $sum: '$amount' },
+              $facet: {
+                daily: [
+                  { $match: { dateReceived: { $gte: since } } },
+                  {
+                    $group: {
+                      _id: { $dateToString: { format: '%Y-%m-%d', date: '$dateReceived', timezone: BD_TZ } },
+                      count: { $sum: 1 },
+                      amount: { $sum: '$amount' },
+                    },
+                  },
+                ],
+                month: [{ $match: { dateReceived: { $gte: thisMonthStart } } }, sumGroup],
+                prevMonth: [
+                  { $match: { dateReceived: { $gte: lastMonthStart, $lt: lastMonthComparableEnd } } },
+                  sumGroup,
+                ],
+                peak: [
+                  { $match: { dateReceived: { $gte: peakSince } } },
+                  { $group: { _id: { $hour: { date: '$dateReceived', timezone: BD_TZ } }, count: { $sum: 1 } } },
+                ],
               },
             },
-          ]),
-        ]);
+          ]);
 
-        const totals = totalsAgg[0] || { count: 0, amount: 0 };
-        const countMap = {};
-        const amountMap = {};
-        for (const d of dailyAgg) { countMap[d._id] = d.count; amountMap[d._id] = d.amount; }
-        return { name, count: totals.count, amount: totals.amount, countMap, amountMap };
-      })
-    );
+          const countMap = {};
+          const amountMap = {};
+          for (const d of f.daily) { countMap[d._id] = d.count; amountMap[d._id] = d.amount; }
+          return {
+            name,
+            countMap,
+            amountMap,
+            month: f.month[0] || EMPTY,
+            prevMonth: f.prevMonth[0] || EMPTY,
+            peak: f.peak,
+          };
+        })
+      ),
+    ]);
 
     // Build the day axis (oldest → newest) in BD local calendar terms.
     const labels = [];
@@ -291,9 +394,10 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
     const series = {};          // daily payment counts, per platform
     const revenueSeries = {};   // daily revenue (amount), per platform
     for (const p of perPlatform) {
-      totals.count += p.count;
-      totals.amount += p.amount;
-      totals.byPlatform[p.name] = { count: p.count, amount: p.amount };
+      const { count, amount } = allTime[p.name];
+      totals.count += count;
+      totals.amount += amount;
+      totals.byPlatform[p.name] = { count, amount };
       series[p.name] = labels.map((day) => p.countMap[day] || 0);
       revenueSeries[p.name] = labels.map((day) => p.amountMap[day] || 0);
     }
@@ -322,47 +426,13 @@ router.get('/api/stats', requireAdmin, async (_req, res, next) => {
     const last7     = sumRange(DAYS - 7, DAYS - 1);
     const prev7     = sumRange(0, DAYS - 8);
 
-    // Month-to-date vs the same elapsed window last month (so day 3 of a
-    // month doesn't compare against a full prior month and look like a drop).
-    const now = new Date();
-    const nowBD = bdNow();
-    const thisMonthStart = bdMonthStartUTC(nowBD, 0);
-    const lastMonthStart = bdMonthStartUTC(nowBD, -1);
-    const lastMonthComparableEnd = new Date(lastMonthStart.getTime() + (now - thisMonthStart));
+    const month = perPlatform.reduce(
+      (a, p) => ({ count: a.count + p.month.count, amount: a.amount + p.month.amount }), { count: 0, amount: 0 });
+    const prevMonthSame = perPlatform.reduce(
+      (a, p) => ({ count: a.count + p.prevMonth.count, amount: a.amount + p.prevMonth.amount }), { count: 0, amount: 0 });
 
-    const monthRanges = await Promise.all(
-      Object.values(MODELS).map(async (Model) => {
-        const [monthAgg, prevMonthAgg] = await Promise.all([
-          Model.aggregate([
-            { $match: { dateReceived: { $gte: thisMonthStart } } },
-            { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
-          ]),
-          Model.aggregate([
-            { $match: { dateReceived: { $gte: lastMonthStart, $lt: lastMonthComparableEnd } } },
-            { $group: { _id: null, count: { $sum: 1 }, amount: { $sum: '$amount' } } },
-          ]),
-        ]);
-        return { month: monthAgg[0] || { count: 0, amount: 0 }, prevMonth: prevMonthAgg[0] || { count: 0, amount: 0 } };
-      })
-    );
-    const month = monthRanges.reduce(
-      (a, r) => ({ count: a.count + r.month.count, amount: a.amount + r.month.amount }), { count: 0, amount: 0 });
-    const prevMonthSame = monthRanges.reduce(
-      (a, r) => ({ count: a.count + r.prevMonth.count, amount: a.amount + r.prevMonth.amount }), { count: 0, amount: 0 });
-
-    // ---- Peak hours — transaction count by BD hour-of-day, last 30 days ----
-    const PEAK_DAYS = 30;
-    const peakSince = new Date(now.getTime() - PEAK_DAYS * 24 * 60 * 60 * 1000);
     const peakCounts = new Array(24).fill(0);
-    await Promise.all(
-      Object.values(MODELS).map(async (Model) => {
-        const agg = await Model.aggregate([
-          { $match: { dateReceived: { $gte: peakSince } } },
-          { $group: { _id: { $hour: { date: '$dateReceived', timezone: BD_TZ } }, count: { $sum: 1 } } },
-        ]);
-        for (const row of agg) peakCounts[row._id] += row.count;
-      })
-    );
+    for (const p of perPlatform) for (const row of p.peak) peakCounts[row._id] += row.count;
 
     res.json({
       totals,

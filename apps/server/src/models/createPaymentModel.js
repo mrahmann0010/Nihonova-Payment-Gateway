@@ -38,13 +38,11 @@ function createPaymentModel(modelName, collectionName, extraFields = {}) {
         type: String,
         required: true,
         unique: true,
-        index: true,
       },
 
       dateReceived: {
         type: Date,
         required: true,
-        index: true,
       },
 
       // Original local-time string printed inside the SMS, kept verbatim so the
@@ -75,6 +73,14 @@ function createPaymentModel(modelName, collectionName, extraFields = {}) {
       collection: collectionName,
     }
   );
+
+  // Ledger order and the keyset paging cursor; its dateReceived prefix also
+  // serves every date-range aggregation.
+  schema.index({ dateReceived: -1, _id: -1 });
+
+  // Sender-prefix search, and the reports' returning-customer lookup
+  // (sender IN [...] AND dateReceived < range start).
+  schema.index({ sender: 1, dateReceived: 1 });
 
   return mongoose.model(modelName, schema);
 }

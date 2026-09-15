@@ -19,6 +19,7 @@ const express      = require('express');
 const router       = express.Router();
 const parsePayment = require('../services/parsePayment');
 const log          = require('../services/logger');
+const { invalidateAllTimeTotals } = require('../services/totalsCache');
 
 const Bkash        = require('../models/Bkash');
 const Nagad        = require('../models/Nagad');
@@ -97,6 +98,7 @@ router.post('/sms', async (req, res) => {
     });
 
     await doc.save();
+    invalidateAllTimeTotals();
 
     log.info('WEBHOOK', 'saved', {
       platform: parsed.platform,
