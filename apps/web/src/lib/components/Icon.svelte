@@ -16,7 +16,16 @@
     | 'minus-circle'
     | 'ledger'
     | 'sign-out'
-    | 'arrow-right';
+    | 'arrow-right'
+    | 'phone'
+    | 'shield'
+    | 'code'
+    | 'database'
+    | 'clock'
+    | 'lock'
+    | 'layers'
+    | 'zap'
+    | 'globe';
 </script>
 
 <script lang="ts">
@@ -91,5 +100,34 @@
   {:else if name === 'arrow-right'}
     <line x1="4" y1="12" x2="19" y2="12" />
     <polyline points="13 6 19 12 13 18" />
+  {:else if name === 'phone'}
+    <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+    <line x1="10.5" y1="18.5" x2="13.5" y2="18.5" />
+  {:else if name === 'shield'}
+    <path d="M12 3l7 3v5.5c0 4-3 7.5-7 9-4-1.5-7-5-7-9V6l7-3z" />
+    <polyline points="9 12 11 14 15 10" />
+  {:else if name === 'code'}
+    <polyline points="8.5 8 4.5 12 8.5 16" />
+    <polyline points="15.5 8 19.5 12 15.5 16" />
+    <line x1="13.5" y1="6" x2="10.5" y2="18" />
+  {:else if name === 'database'}
+    <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+    <path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6" />
+    <path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" />
+  {:else if name === 'clock'}
+    <circle cx="12" cy="12" r="9" />
+    <polyline points="12 7 12 12 15.5 14" />
+  {:else if name === 'lock'}
+    <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+    <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+  {:else if name === 'layers'}
+    <path d="M12 3l8.5 4.5L12 12 3.5 7.5 12 3z" />
+    <polyline points="3.5 12.5 12 17 20.5 12.5" />
+  {:else if name === 'zap'}
+    <path d="M13 3L5 13.5h6L11 21l8-10.5h-6L13 3z" />
+  {:else if name === 'globe'}
+    <circle cx="12" cy="12" r="9" />
+    <line x1="3" y1="12" x2="21" y2="12" />
+    <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z" />
   {/if}
 </svg>
