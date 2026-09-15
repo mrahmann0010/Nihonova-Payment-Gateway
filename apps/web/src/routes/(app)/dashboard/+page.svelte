@@ -56,7 +56,7 @@
   );
 
   // Latest transaction + the five behind it (payments, limit 6).
-  const recentParams = { platform: 'all', page: 1, limit: 6 };
+  const recentParams = { platform: 'all', limit: 6 };
   const recentQuery = createQuery(() => ({
     queryKey: keys.payments(recentParams),
     queryFn: () => api.payments(recentParams),

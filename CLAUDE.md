@@ -22,6 +22,8 @@ Server (`cd apps/server`):
 - `npm run dev` — nodemon
 - `npm start` — node
 - `npm run seed-admin` — create the initial admin user from `DEFAULT_ADMIN_USER` / `DEFAULT_ADMIN_PASS`
+- `npm run sync-indexes` — build schema indexes and drop stale ones. Mongoose only ever *adds*
+  indexes at startup, so run this after changing any `schema.index` / `index:` option.
 - No test runner is configured (`npm test` is a stub). Verify server changes with `node --check <file>`.
 
 Web (`cd apps/web`):
@@ -50,6 +52,11 @@ Web (`cd apps/web`):
   (`BD_TZ = '+06:00'`, `BD_OFFSET_MS`). Use the `bdNow()` / date helpers in `admin.js` rather than
   raw `new Date()` when bucketing by calendar day, or buckets will straddle the wrong day.
 - Parsers live in `apps/server/src/services/*Parser.js` (one per platform) behind `parsePayment.js`.
+- **Query cost must not grow with history.** `/admin/api/payments` is keyset-paged (`cursor` =
+  `dateReceived_id`, index `{dateReceived:-1,_id:-1}`) — never reintroduce skip/offset. Search is
+  anchored-prefix only so it stays on an index. The only unbounded aggregation (all-time totals) is
+  cached in `services/totalsCache.js` and invalidated by the webhook on save.
+  `webhook_events` has a 90-day TTL.
 
 ## Web data layer — TanStack Query
 
@@ -65,7 +72,8 @@ fetches. Read `apps/web/src/lib/query.ts` first.
   (no `$store` subscription). Gate every query with `enabled: auth.authed`.
 - The root `+layout.svelte` owns the single `QueryClientProvider`; its own alert queries pass the
   client explicitly as the second accessor arg (they live outside the provider's child context).
-- Transactions list uses `createInfiniteQuery` and de-dupes flattened pages by `platform+trxId`.
+- Transactions list uses `createInfiniteQuery` over the server's `nextCursor` and de-dupes flattened
+  pages by `platform+trxId`.
 
 ## Styling — Tailwind v4 + the Nihonova design system
 

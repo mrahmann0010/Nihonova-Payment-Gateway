@@ -39,13 +39,20 @@
   });
 
   // Infinite, background-polled list. Refetching re-pulls every loaded page, so
-  // a new transaction lands at the top on its own — no manual reload.
+  // a new transaction lands at the top on its own — no manual reload. Pages are
+  // keyset cursors (not offsets), so each refetched page stays cheap however far
+  // the list has been scrolled.
   const q = createInfiniteQuery(() => ({
     queryKey: keys.payments({ platform, search: debouncedSearch }),
     queryFn: ({ pageParam }) =>
-      api.payments({ platform, search: debouncedSearch, page: pageParam, limit: LIMIT }),
-    initialPageParam: 1,
-    getNextPageParam: (last) => (last.page < last.pages ? last.page + 1 : undefined),
+      api.payments({
+        platform,
+        search: debouncedSearch,
+        limit: LIMIT,
+        ...(pageParam ? { cursor: pageParam } : {})
+      }),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: auth.authed
   }));
 
@@ -96,7 +103,7 @@
   <div class="flex flex-wrap items-center gap-3">
     <Segmented bind:value={platform} options={PLATFORM_TABS} label="Filter by platform" />
     <div class="min-w-45 flex-1">
-      <Input bind:value={search} icon="search" placeholder="Search trxId or sender…" />
+      <Input bind:value={search} icon="search" placeholder="TrxID or sender, from the start…" />
     </div>
   </div>
 

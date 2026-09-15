@@ -13,7 +13,6 @@ const schema = new mongoose.Schema(
       type: String,
       enum: ['unmatched', 'duplicate', 'unknown_sender', 'error'],
       required: true,
-      index: true,
     },
     platform:   { type: String, default: null },
     sender:     { type: String, default: null },
@@ -23,6 +22,8 @@ const schema = new mongoose.Schema(
   { timestamps: { createdAt: true, updatedAt: false }, collection: 'webhook_events' }
 );
 
-schema.index({ createdAt: -1 });
+// Health only reads the last 7 days plus the latest 50 events, so older rows are
+// dead weight — the TTL monitor deletes them after 90 days.
+schema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
 
 module.exports = mongoose.model('WebhookEvent', schema);
