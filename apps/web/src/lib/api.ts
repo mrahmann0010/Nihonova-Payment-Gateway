@@ -16,6 +16,11 @@ export class ApiError extends Error {
   }
 }
 
+// Sent on every write. The server refuses a state-changing request without it
+// (middleware/csrfGuard.js) — a custom header can't be set by a cross-site
+// form, and it forces a preflight the origin allowlist then rejects.
+const REQUESTED_WITH = 'nihonova-admin';
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -23,8 +28,25 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { ...(init.headers ?? {}) }
   });
   if (res.status === 401) throw new ApiError(401, 'Not authenticated');
-  if (!res.ok) throw new ApiError(res.status, `Request failed (${res.status})`);
+  if (!res.ok) {
+    // Validation failures carry a message meant for the admin ("That client ID
+    // is already taken") — surface it instead of a bare status code.
+    const message = await res
+      .json()
+      .then((b) => (b && typeof b.error === 'string' ? b.error : null))
+      .catch(() => null);
+    throw new ApiError(res.status, message ?? `Request failed (${res.status})`);
+  }
   return res.status === 204 ? (undefined as T) : (res.json() as Promise<T>);
+}
+
+// Write helper — JSON body plus the two headers every mutation needs.
+function write<T>(path: string, method: 'POST' | 'PATCH', body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': REQUESTED_WITH },
+    body: JSON.stringify(body ?? {})
+  });
 }
 
 // ---- Response shapes (mirrors src/routes/admin.js) ----
@@ -89,6 +111,50 @@ export interface Report {
 
 export interface Session { username: string }
 
+// A registered consuming app (mirrors serialize() in src/routes/clients.js).
+// No secret field exists anywhere in this shape — the server never sends one.
+export interface Client {
+  clientId: string;
+  name: string;
+  active: boolean;
+
+  ownerName: string;
+  ownerEmail: string;
+  ownerPhone: string;
+  notes: string;
+
+  maxClaimAmount: number | null;
+  claimWindowDays: number | null;
+  // When on, a claim must carry the payer's phone and it must match the
+  // payment's sender.
+  requireSenderMatch: boolean;
+
+  secretSetAt: string;
+  rotatedAt: string | null;
+  lastUsedAt: string | null;
+  // Non-null only while a rotation's grace window is still open, i.e. while
+  // the previous secret also still authenticates.
+  previousExpiresAt: string | null;
+
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Business + policy fields. Everything optional: a PATCH sends only what changed.
+export interface ClientInput {
+  name?: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  ownerPhone?: string;
+  notes?: string;
+  maxClaimAmount?: number | null;
+  claimWindowDays?: number | null;
+  requireSenderMatch?: boolean;
+  active?: boolean;
+}
+
 export const api = {
   // ---- Auth (cookie session) ----
   login: (username: string, password: string) =>
@@ -114,5 +180,23 @@ export const api = {
     if (from) qs.set('from', from);
     if (to) qs.set('to', to);
     return request<Report>(`/admin/api/reports?${qs.toString()}`);
-  }
+  },
+
+  // ---- Clients (registered consuming apps) ----
+  clients: () => request<{ clients: Client[] }>('/admin/api/clients'),
+
+  createClient: (body: ClientInput & { clientId: string; name: string; secret: string }) =>
+    write<{ client: Client }>('/admin/api/clients', 'POST', body),
+
+  updateClient: (clientId: string, body: ClientInput) =>
+    write<{ client: Client }>(`/admin/api/clients/${clientId}`, 'PATCH', body),
+
+  rotateClientSecret: (clientId: string, secret: string, graceHours: number) =>
+    write<{ client: Client }>(`/admin/api/clients/${clientId}/rotate`, 'POST', {
+      secret,
+      graceHours
+    }),
+
+  revokeClientPrevious: (clientId: string) =>
+    write<{ client: Client }>(`/admin/api/clients/${clientId}/revoke-previous`, 'POST')
 };

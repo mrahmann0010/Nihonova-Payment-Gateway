@@ -15,6 +15,8 @@ const models = [
   require('../models/Rocket'),
   require('../models/WebhookEvent'),
   require('../models/User'),
+  require('../models/Client'),
+  require('../models/Claim'),
 ];
 
 (async () => {

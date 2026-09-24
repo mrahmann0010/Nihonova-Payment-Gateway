@@ -7,6 +7,7 @@
     { href: '/dashboard', label: 'Dashboard' },
     { href: '/transactions', label: 'Transactions' },
     { href: '/reports', label: 'Reports' },
+    { href: '/clients', label: 'Businesses' },
     { href: '/health', label: 'Health' }
   ];
 </script>

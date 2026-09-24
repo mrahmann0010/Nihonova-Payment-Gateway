@@ -8,6 +8,8 @@ const verifySignature = require('./middleware/verifySignature');
 const webhookRouter  = require('./routes/webhook');
 const adminRouter    = require('./routes/admin');
 const authRouter     = require('./routes/auth');
+const clientsRouter  = require('./routes/clients');
+const v1Router       = require('./routes/v1');
 const log            = require('./services/logger');
 
 if (!process.env.MONGO_URI) {
@@ -34,8 +36,15 @@ app.use((req, res, next) => {
     res.set('Access-Control-Allow-Credentials', 'true');
     res.set('Vary', 'Origin');
   }
-  res.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type, x-admin-token, Authorization');
+  res.set('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS');
+  // x-requested-with is the CSRF guard's header (middleware/csrfGuard.js).
+  // Listing it here is what makes the guard work: a custom header forces a
+  // preflight, and the preflight is rejected above for any origin not on the
+  // allowlist — so a cross-site write never reaches a route.
+  res.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, x-admin-token, x-requested-with, Authorization'
+  );
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
@@ -82,7 +91,16 @@ app.use((req, res, next) => {
 
 app.use('/admin/auth', authRouter);
 
+// Mounted before the general /admin router so the client routes' own error
+// shaping and CSRF guard apply, rather than admin.js's read-only handlers.
+app.use('/admin/api/clients', clientsRouter);
+
 app.use('/admin', adminRouter);
+
+// Public API for consuming apps (payment claims). Authenticates with a client
+// Bearer credential, not the admin session — a business must never hold an
+// admin token, and this surface has no list or search capability at all.
+app.use('/v1', v1Router);
 
 app.use('/webhooks', verifySignature, webhookRouter);
 

@@ -1,0 +1,39 @@
+# Local development database.
+#
+# The gateway's real data lives in a MongoDB Atlas cluster. Developing against
+# it means every experiment — a test claim, a seeded payment, a sync-indexes run
+# — lands on live payment records, and `sync-indexes` in particular *drops*
+# indexes it doesn't recognise. This container is the sandbox that makes those
+# operations cheap to get wrong.
+#
+#   docker compose up -d            start it
+#   npm run db:copy  (apps/server)  refresh it from Atlas, replacing local data
+#   docker compose down             stop it, keeping the data
+#   docker compose down -v          stop it and delete the data
+#
+# Matches the Atlas cluster's major version (8.x) so an index or query that
+# works here works there.
+
+services:
+  mongo:
+    image: mongo:8
+    container_name: nihonova-mongo
+    restart: unless-stopped
+    ports:
+      # Bound to the loopback address, not 0.0.0.0. The default publishes the
+      # port on every interface, which on a café network means an unauthenticated
+      # database — and this one holds a copy of real payment records.
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - mongo-data:/data/db
+    # No credentials on purpose: the port is unreachable from off-machine, and a
+    # local URI that needs no secret is one less thing to leak into a commit.
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.adminCommand("ping")']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  mongo-data:

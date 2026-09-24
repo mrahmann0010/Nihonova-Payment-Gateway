@@ -10,6 +10,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed-admin": "node src/scripts/seed-admin.js",
+    "db:copy": "bash scripts/copy-db-from-atlas.sh",
     "sync-indexes": "node src/scripts/sync-indexes.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

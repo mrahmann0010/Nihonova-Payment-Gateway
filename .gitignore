@@ -1,5 +1,14 @@
 node_modules/
+
+# Environment files. Everything is ignored and the examples are re-included by
+# name, so a NEW variant (.env.atlas, .env.local, .env.production…) is ignored
+# the moment it is created rather than the moment someone remembers to add it.
+# .env.atlas holds the real Atlas connection string and the live webhook/admin
+# secrets — it must never be committed.
 .env
+.env.*
+!.env.example
+!.env.atlas.example
 
 # Documentation
 docs/
