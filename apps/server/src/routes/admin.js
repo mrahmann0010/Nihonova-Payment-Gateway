@@ -3,17 +3,19 @@
 // Routes (all under /admin):
 //   GET /admin                 → dashboard HTML (public shell; data needs token)
 //   GET /admin/api/payments    → paginated, filterable transaction list (token)
+//   GET /admin/api/unclaimed   → payments in a date window with no live claim
+//                                 against them — money nobody was credited for
 //   GET /admin/api/stats       → totals, 14-day daily/revenue series, period
 //                                 comparisons (today/yesterday/7d/month), and
 //                                 a 30-day peak-hours histogram (token)
 //
-// Auth: every /api/* route requires the admin token, supplied as either
-//   ?token=<ADMIN_TOKEN>  or  Authorization: Bearer <ADMIN_TOKEN>  or
-//   x-admin-token: <ADMIN_TOKEN>. Mirrors the dev-fallback behaviour of the
-//   webhook auth: if ADMIN_TOKEN is unset, access is allowed in dev but
-//   refused in production.
+// Auth: every /api/* route goes through requireAdmin (middleware/requireAdmin),
+// which reads the httpOnly JWT session cookie and falls back to the legacy
+// shared ADMIN_TOKEN for scripts.
+//
+// Every route here is a read. Writes live in routes/clients.js, which adds a
+// CSRF guard on top of requireAdmin for exactly that reason.
 
-const crypto    = require('crypto');
 const express   = require('express');
 const { Types } = require('mongoose');
 const router    = express.Router();
@@ -21,11 +23,25 @@ const router    = express.Router();
 const Bkash        = require('../models/Bkash');
 const Nagad        = require('../models/Nagad');
 const Rocket       = require('../models/Rocket');
+const Claim        = require('../models/Claim');
 const WebhookEvent = require('../models/WebhookEvent');
-const { verify: verifyJwt, COOKIE_NAME } = require('../services/jwt');
+const requireAdmin = require('../middleware/requireAdmin');
 const { getAllTimeTotals } = require('../services/totalsCache');
 
 const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
+
+// Shortest accepted `search`. A one- or two-character prefix returns a page of
+// other people's payments for free: "?search=A" was up to 100 rows whose ID
+// merely starts with A, which is enumeration rather than search. Four is short
+// enough for every real lookup — trxIds run 6–12 characters and a phone prefix
+// like "0171" is already four — and long enough that a guess has to be most of
+// the answer before it returns anything.
+//
+// The `sender` arm of the filter is deliberately KEPT. Dropping it would close
+// the same hole, but it would also remove the lookup an admin does most often:
+// matching a bKash statement against the ledger by phone number. With a floor
+// on length the fishing is closed either way, so the arm costs nothing to keep.
+const MIN_SEARCH = 4;
 
 // Only the fields the dashboard renders (see serialize()). Projecting these
 // keeps the large `rawMessage` text off the wire and out of memory.
@@ -58,53 +74,6 @@ function bdDateStringToUTC(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const bdMidnightAsUTCFields = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
   return new Date(bdMidnightAsUTCFields.getTime() - BD_OFFSET_MS);
-}
-
-// ---------------------------------------------------------------------------
-// Auth middleware for the data API.
-// ---------------------------------------------------------------------------
-function requireAdmin(req, res, next) {
-  // Primary auth: the httpOnly JWT session cookie set at /admin/auth/login.
-  const sessionToken = req.cookies?.[COOKIE_NAME];
-  if (sessionToken) {
-    try {
-      verifyJwt(sessionToken);
-      return next();
-    } catch {
-      // Fall through to the legacy token check below.
-    }
-  }
-
-  // Legacy auth: shared ADMIN_TOKEN via header/query/bearer. Kept for
-  // backward compatibility (e.g. scripts); the dashboard now uses the cookie.
-  const secret = process.env.ADMIN_TOKEN;
-  const isPlaceholder = !secret || secret === 'your-admin-token-here';
-
-  if (isPlaceholder) {
-    if (process.env.NODE_ENV === 'production') {
-      console.error('[Admin] ADMIN_TOKEN not configured in production — rejecting request');
-      return res.status(503).json({ error: 'Admin disabled — ADMIN_TOKEN not configured' });
-    }
-    console.warn('[Admin] ADMIN_TOKEN not configured — auth disabled (dev only)');
-    return next();
-  }
-
-  const header = req.get('authorization') || '';
-  const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
-  const token  = req.query.token || req.get('x-admin-token') || bearer;
-
-  if (!token) return res.status(401).json({ error: 'Missing token' });
-
-  const expected = Buffer.from(secret);
-  const received = Buffer.from(String(token));
-  if (
-    expected.length !== received.length ||
-    !crypto.timingSafeEqual(expected, received)
-  ) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
-
-  next();
 }
 
 // Shape a raw document into the fields the dashboard renders.
@@ -222,10 +191,14 @@ async function fetchPayments({ platform, limit, search, cursor }) {
 
 // Normalise the list query params.
 function listParams(req) {
+  const search = (req.query.search || '').trim();
+  if (search && search.length < MIN_SEARCH) {
+    throw badRequest(`Search needs at least ${MIN_SEARCH} characters`);
+  }
   return {
     platform: String(req.query.platform || 'all').toLowerCase(),
     limit: Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25)),
-    search: (req.query.search || '').trim(),
+    search,
     cursor: decodeCursor(req.query.cursor),
   };
 }
@@ -295,6 +268,126 @@ router.get('/api/health', requireAdmin, async (_req, res, next) => {
 router.get('/api/payments', requireAdmin, async (req, res, next) => {
   try {
     const data = await fetchPayments(listParams(req));
+    res.json(data);
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Unclaimed payments — money received that nobody was credited for.
+//
+// The operational payoff of the claims ledger, and unanswerable before it: a
+// payment with no claim is either a student who paid and never got their order,
+// or a business verifying payments without writing claims. The inverse (a claim
+// with no payment) cannot happen — routes/v1.js finds the payment first.
+//
+// ## Why this is a window report and not an infinite list
+//
+// Every other list here is keyset-paged. This one is bounded by a date window
+// instead, because "unclaimed" is a property of the *absence* of a row and there
+// is no index that can page it. Filling a page of 25 unclaimed payments out of a
+// history where nearly all are claimed would mean walking the whole history —
+// exactly the cost-grows-with-history rule this codebase is built against. A
+// window bounds the work by calendar time no matter how large the ledger gets.
+//
+// It is also the right shape for the job: this is a list an admin acts on, not
+// one they browse. Anything older than the window is a backfill question, not an
+// operational one.
+// ---------------------------------------------------------------------------
+const UNCLAIMED_DEFAULT_DAYS = 30;
+const UNCLAIMED_MAX_DAYS     = 365;
+// Enough to act on; past this the answer is "something is systematically wrong"
+// and a longer list adds nothing. Reported via `truncated` rather than silently.
+const UNCLAIMED_MAX_ROWS     = 500;
+// Mongo handles a large $in fine, but chunking keeps one query's document off
+// the 16MB cap on a very busy window.
+const TRX_LOOKUP_CHUNK = 1000;
+
+// Which of these trxIds currently hold a live claim.
+//
+// Payment trxIds are stored [A-Z0-9] uppercase by every parser, and the claim
+// path normalises to that same form (services/trxId.js), so these compare
+// directly. `state: 'claimed'` is the whole point — a released claim must leave
+// its payment showing as unclaimed again, which is what a release means.
+async function claimedTrxIds(trxIds) {
+  const held = new Set();
+  for (let i = 0; i < trxIds.length; i += TRX_LOOKUP_CHUNK) {
+    const chunk = trxIds.slice(i, i + TRX_LOOKUP_CHUNK);
+    const rows = await Claim.find({ trxId: { $in: chunk }, state: 'claimed' })
+      .select('trxId')
+      .lean();
+    for (const r of rows) held.add(r.trxId);
+  }
+  return held;
+}
+
+async function computeUnclaimed({ days, platform }) {
+  const entries = platform === 'all' ? Object.entries(MODELS) : [[platform, MODELS[platform]]];
+  if (!entries[0][1]) throw badRequest('Unknown platform');
+
+  const since = new Date(Date.now() - days * 86_400_000);
+
+  // Index-served on {dateReceived:-1,_id:-1} — the same index the ledger pages
+  // on, so the window costs one range scan per collection.
+  const fetched = await Promise.all(
+    entries.map(async ([name, Model]) => {
+      const docs = await Model.find({ dateReceived: { $gte: since } })
+        .select(LIST_FIELDS)
+        .sort(PAGE_SORT)
+        .lean();
+      return docs.map((doc) => ({ name, doc }));
+    })
+  );
+
+  const rows = fetched.flat().sort((a, b) => byNewest(a.doc, b.doc));
+  const held = await claimedTrxIds(rows.map((r) => r.doc.trxId));
+  const unclaimed = rows.filter((r) => !held.has(r.doc.trxId));
+
+  // Summary covers everything in the window, not just the rows returned, so a
+  // truncated list still reports the true total.
+  const byPlatform = {};
+  let amount = 0;
+  for (const r of unclaimed) {
+    const p = (byPlatform[r.name] ??= { count: 0, amount: 0 });
+    p.count += 1;
+    p.amount += r.doc.amount;
+    amount += r.doc.amount;
+  }
+
+  return {
+    payments: unclaimed.slice(0, UNCLAIMED_MAX_ROWS).map((r) => serialize(r.doc, r.name)),
+    truncated: unclaimed.length > UNCLAIMED_MAX_ROWS,
+    summary: {
+      days,
+      since,
+      // Of the payments received in the window, how many are spoken for. The
+      // ratio is the number worth watching: it should be near 1 once the
+      // consuming apps are cut over, and far from it while they are not.
+      received: rows.length,
+      count: unclaimed.length,
+      amount,
+      byPlatform,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// GET /admin/api/unclaimed
+//   ?days=30  &platform=all|bkash|nagad|rocket
+// ---------------------------------------------------------------------------
+router.get('/api/unclaimed', requireAdmin, async (req, res, next) => {
+  try {
+    const raw = parseInt(req.query.days, 10);
+    const days = Math.min(
+      UNCLAIMED_MAX_DAYS,
+      Math.max(1, Number.isFinite(raw) ? raw : UNCLAIMED_DEFAULT_DAYS)
+    );
+    const data = await computeUnclaimed({
+      days,
+      platform: String(req.query.platform || 'all').toLowerCase(),
+    });
     res.json(data);
   } catch (err) {
     if (err.status === 400) return res.status(400).json({ error: err.message });

@@ -38,16 +38,25 @@
     return () => clearTimeout(debounce);
   });
 
+  // The server refuses a search shorter than this (MIN_SEARCH in routes/admin.js)
+  // — a two-character prefix returns a page of arbitrary payments, which is
+  // enumeration rather than search. Hold the query at unfiltered until the input
+  // is long enough instead of firing a request that comes back 400: a partly
+  // typed word is not an error the admin needs to see.
+  const MIN_SEARCH = 4;
+  const searchTooShort = $derived(search.trim().length > 0 && search.trim().length < MIN_SEARCH);
+  const effectiveSearch = $derived(debouncedSearch.trim().length >= MIN_SEARCH ? debouncedSearch : '');
+
   // Infinite, background-polled list. Refetching re-pulls every loaded page, so
   // a new transaction lands at the top on its own — no manual reload. Pages are
   // keyset cursors (not offsets), so each refetched page stays cheap however far
   // the list has been scrolled.
   const q = createInfiniteQuery(() => ({
-    queryKey: keys.payments({ platform, search: debouncedSearch }),
+    queryKey: keys.payments({ platform, search: effectiveSearch }),
     queryFn: ({ pageParam }) =>
       api.payments({
         platform,
-        search: debouncedSearch,
+        search: effectiveSearch,
         limit: LIMIT,
         ...(pageParam ? { cursor: pageParam } : {})
       }),
@@ -73,7 +82,9 @@
     return out;
   });
   const total = $derived(q.data?.pages[0]?.total ?? 0);
-  const filtered = $derived(platform !== 'all' || debouncedSearch.trim() !== '');
+  // Reflects what was actually queried, not what is typed — a half-typed search
+  // hasn't filtered anything, so the empty state must not blame it.
+  const filtered = $derived(platform !== 'all' || effectiveSearch.trim() !== '');
 
   // Infinite scroll: observe the sentinel row.
   let sentinel = $state<HTMLElement>();
@@ -104,6 +115,11 @@
     <Segmented bind:value={platform} options={PLATFORM_TABS} label="Filter by platform" />
     <div class="min-w-45 flex-1">
       <Input bind:value={search} icon="search" placeholder="TrxID or sender, from the start…" />
+      {#if searchTooShort}
+        <div class="mt-1.5 text-small text-ink-soft">
+          Keep typing — a search needs at least {MIN_SEARCH} characters.
+        </div>
+      {/if}
     </div>
   </div>
 
