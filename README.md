@@ -53,7 +53,7 @@ it's a monitoring tool built around one question, *is the pipeline still trustwo
 | **Data layer** | TanStack Query v6 (Svelte runes API) — `createQuery` / `createInfiniteQuery` |
 | **Charts** | Chart.js with a custom axis renderer |
 | **Styling** | Tailwind v4 — tokens in one `@theme` block, zero `<style>` blocks, no `tailwind.config.js` |
-| **Deploy** | Vercel (`adapter-vercel`, Node 20) |
+| **Deploy** | Vercel (`adapter-vercel`, Node 24) |
 
 ### Features
 

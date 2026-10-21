@@ -12,7 +12,7 @@ over a credentialed JSON API.
 ## Layout — two-app monorepo (no root package.json)
 
 - `apps/server` — Express 5 + Mongoose 9 JSON API. Entry `src/server.js`; app wiring in `src/app.js`.
-- `apps/web` — SvelteKit 2 / **Svelte 5 (runes)** dashboard SPA, deployed on Vercel (`adapter-vercel`, Node 20).
+- `apps/web` — SvelteKit 2 / **Svelte 5 (runes)** dashboard SPA, deployed on Vercel (`adapter-vercel`, Node 24).
 
 Each app has its own `package.json`; run commands from inside the app directory.
 
