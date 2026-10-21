@@ -115,6 +115,17 @@ design is in [docs/payment-claims.md](docs/payment-claims.md).
 - Policy: underpayment is refused, overpayment claims and records `overpaidBy`, and sender binding
   is the per-client `requireSenderMatch` flag (default off). The `reason` strings in the error
   taxonomy are a published contract — consuming apps switch on them, so don't rename one.
+- **Release is admin-only** (`routes/claims.js`, `POST /admin/api/claims/:id/release`, behind
+  `requireAdmin` + `csrfGuard`) and requires a reason. It's the one operation that makes a spent
+  payment spendable again, so a client credential must never be able to do it. The update is
+  conditional on `state: 'claimed'` rather than read-modify-write, so two admins racing produce one
+  release and one 409.
+- A replay whose stored claim is **not** `state: 'claimed'` returns `409 claim_released`, never a
+  `200`. The row survives a release, so replaying it as success would tell an app it still holds a
+  payment that was refunded out from under it.
+- The Claims page (`routes/(app)/claims/`) is keyset-paged on `{claimedAt:-1,_id:-1}`, and its
+  `trxId` filter is an **exact** match — an anchored-prefix search here would rebuild the fishing
+  surface that `/admin/api/payments` is being hardened against.
 
 ## Data conventions
 

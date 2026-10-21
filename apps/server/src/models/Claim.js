@@ -58,7 +58,11 @@ const schema = new mongoose.Schema(
 
     claimedAt:     { type: Date, default: Date.now },
     releasedAt:    { type: Date, default: null },
+    // Why, and who by. A release hands a payment back to whoever asks for it
+    // next, so it is the one action here that needs an explanation attached —
+    // an unexplained release is indistinguishable from an attempt to double-spend.
     releaseReason: { type: String, default: '' },
+    releasedBy:    { type: String, default: '' },
   },
   { timestamps: true, collection: 'claims' }
 );
@@ -84,5 +88,11 @@ schema.index({ clientId: 1, idempotencyKey: 1 }, { unique: true });
 
 // Per-business history, newest first.
 schema.index({ clientId: 1, claimedAt: -1 });
+
+// The dashboard's ledger order and its keyset paging cursor. _id breaks the tie
+// because two claims can land in the same millisecond and the cursor needs a
+// strict total order — same reason the payment collections pair
+// dateReceived with _id.
+schema.index({ claimedAt: -1, _id: -1 });
 
 module.exports = mongoose.model('Claim', schema);

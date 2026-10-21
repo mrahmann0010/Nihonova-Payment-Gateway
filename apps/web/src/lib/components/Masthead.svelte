@@ -8,6 +8,8 @@
     { href: '/transactions', label: 'Transactions' },
     { href: '/reports', label: 'Reports' },
     { href: '/clients', label: 'Businesses' },
+    { href: '/claims', label: 'Claims' },
+    { href: '/unclaimed', label: 'Unclaimed' },
     { href: '/health', label: 'Health' }
   ];
 </script>

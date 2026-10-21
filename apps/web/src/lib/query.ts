@@ -17,7 +17,9 @@ export const keys = {
   health: ['health'] as const,
   payments: (params: Record<string, string | number>) => ['payments', params] as const,
   reports: (from: string, to: string) => ['reports', { from, to }] as const,
-  clients: ['clients'] as const
+  clients: ['clients'] as const,
+  claims: (params: Record<string, string | number>) => ['claims', params] as const,
+  unclaimed: (days: number, platform: string) => ['unclaimed', { days, platform }] as const
 };
 
 export function createQueryClient() {

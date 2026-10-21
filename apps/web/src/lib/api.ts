@@ -81,6 +81,26 @@ export interface PaymentsPage {
   nextCursor: string | null;
 }
 
+// Payments in a window with no live claim against them (mirrors
+// computeUnclaimed() in src/routes/admin.js). A window report rather than a
+// paged list — there is no index that can page the absence of a row, so the
+// date window is what keeps the query bounded.
+export interface UnclaimedSummary {
+  days: number;
+  since: string;
+  // Everything received in the window, claimed or not — the denominator.
+  received: number;
+  count: number;
+  amount: number;
+  byPlatform: Record<string, PlatformTotals>;
+}
+export interface Unclaimed {
+  payments: Payment[];
+  // True when the window holds more unclaimed payments than the server returns.
+  truncated: boolean;
+  summary: UnclaimedSummary;
+}
+
 export interface Freshness { name: string; lastReceivedAt: string | null; hoursSince: number | null }
 export interface EventCounts { unmatched: number; duplicate: number; unknown_sender: number; error: number }
 export interface WebhookEvent {
@@ -155,6 +175,36 @@ export interface ClientInput {
   active?: boolean;
 }
 
+// One row of the redemption ledger (mirrors serialize() in src/routes/claims.js).
+// `amount` is what actually arrived; `expectedAmount` is what the business asked
+// for. They differ only upward — underpayment is refused at claim time.
+export interface Claim {
+  id: string;
+  trxId: string;
+  platform: 'bkash' | 'nagad' | 'rocket';
+  amount: number;
+  sender: string;
+
+  expectedAmount: number;
+  overpaidBy: number;
+
+  clientId: string;
+  orderRef: string;
+  idempotencyKey: string;
+
+  state: 'claimed' | 'released';
+  claimedAt: string;
+  releasedAt: string | null;
+  releaseReason: string;
+  releasedBy: string;
+}
+
+export interface ClaimsPage {
+  claims: Claim[];
+  // Keyset cursor; null on the last page. Never an offset — see routes/claims.js.
+  nextCursor: string | null;
+}
+
 export const api = {
   // ---- Auth (cookie session) ----
   login: (username: string, password: string) =>
@@ -175,6 +225,8 @@ export const api = {
     ).toString();
     return request<PaymentsPage>(`/admin/api/payments?${qs}`);
   },
+  unclaimed: (days: number, platform = 'all') =>
+    request<Unclaimed>(`/admin/api/unclaimed?days=${days}&platform=${platform}`),
   reports: (from?: string, to?: string) => {
     const qs = new URLSearchParams();
     if (from) qs.set('from', from);
@@ -198,5 +250,21 @@ export const api = {
     }),
 
   revokeClientPrevious: (clientId: string) =>
-    write<{ client: Client }>(`/admin/api/clients/${clientId}/revoke-previous`, 'POST')
+    write<{ client: Client }>(`/admin/api/clients/${clientId}/revoke-previous`, 'POST'),
+
+  // ---- Claims (the redemption ledger) ----
+  claims: (params: Record<string, string | number> = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params)
+        .filter(([, v]) => v !== '' && v != null)
+        .map(([k, v]) => [k, String(v)])
+    ).toString();
+    return request<ClaimsPage>(`/admin/api/claims?${qs}`);
+  },
+
+  // Hands the payment back so it can be claimed again. Admin-only, and the
+  // reason is required — an unexplained release is indistinguishable from an
+  // attempt to let a payment be spent twice.
+  releaseClaim: (id: string, reason: string) =>
+    write<{ claim: Claim }>(`/admin/api/claims/${id}/release`, 'POST', { reason })
 };

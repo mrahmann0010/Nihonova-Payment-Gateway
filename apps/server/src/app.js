@@ -9,6 +9,7 @@ const webhookRouter  = require('./routes/webhook');
 const adminRouter    = require('./routes/admin');
 const authRouter     = require('./routes/auth');
 const clientsRouter  = require('./routes/clients');
+const claimsRouter   = require('./routes/claims');
 const v1Router       = require('./routes/v1');
 const log            = require('./services/logger');
 
@@ -94,6 +95,7 @@ app.use('/admin/auth', authRouter);
 // Mounted before the general /admin router so the client routes' own error
 // shaping and CSRF guard apply, rather than admin.js's read-only handlers.
 app.use('/admin/api/clients', clientsRouter);
+app.use('/admin/api/claims', claimsRouter);
 
 app.use('/admin', adminRouter);
 

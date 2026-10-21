@@ -25,6 +25,8 @@ const Nagad  = require('../models/Nagad');
 const Rocket = require('../models/Rocket');
 const Claim  = require('../models/Claim');
 const requireClient = require('../middleware/requireClient');
+const { normaliseTrxId } = require('../services/trxId');
+const { createRateLimiter } = require('../services/rateLimit');
 const log = require('../services/logger');
 
 const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
@@ -32,8 +34,26 @@ const MODELS = { bkash: Bkash, nagad: Nagad, rocket: Rocket };
 const MAX_ORDER_REF = 200;
 const MAX_IDEM_KEY  = 200;
 
+// Per-client, per-minute ceiling. Generous on purpose: the documented behaviour
+// on 404 is to poll for ~2 minutes while the SMS catches up, and several
+// customers can be at checkout at once, so this has to sit well above normal
+// traffic and only catch a caller that has stopped backing off.
+const CLAIM_RATE_LIMIT  = Number(process.env.CLAIM_RATE_LIMIT || 120);
+const CLAIM_RATE_WINDOW = 60_000;
+
+// Keyed on the authenticated client, so one business's runaway retry loop can
+// never spend another business's allowance. Runs after requireClient for that
+// reason — before it there is no identity to attribute the request to.
+const claimRateLimit = createRateLimiter({
+  limit: CLAIM_RATE_LIMIT,
+  windowMs: CLAIM_RATE_WINDOW,
+  key: (req) => req.client?.clientId || '',
+});
+
 // One shape for every refusal, so consuming apps can switch on `reason` rather
-// than parsing prose. `retryable` is only ever true for not_found — see below.
+// than parsing prose. `retryable` is set on the two refusals that say nothing
+// about the payment's fate — not_found (the SMS has not landed yet) and
+// rate_limited (asked too fast) — and never on a verdict like already_claimed.
 function refuse(res, status, reason, extra = {}) {
   return res.status(status).json({ claimed: false, reason, ...extra });
 }
@@ -73,6 +93,22 @@ function senderMatches(paymentSender, claimedPhone) {
   return a.slice(-n) === b.slice(-n);
 }
 
+// Rate-limit gate, shaped into /v1's error taxonomy. 429 with a Retry-After, so
+// a polling client is told how long to wait rather than guessing.
+function rateLimitGate(req, res, next) {
+  const verdict = claimRateLimit(req);
+  if (verdict.ok) return next();
+
+  log.warn('CLAIM', 'rate_limited', { clientId: req.client?.clientId });
+  res.set('Retry-After', String(verdict.retryAfterSec));
+  return refuse(res, 429, 'rate_limited', {
+    // Retryable: unlike the other refusals this says nothing about the payment,
+    // only about the pace of asking.
+    retryable: true,
+    retryAfter: verdict.retryAfterSec,
+  });
+}
+
 // Find the payment by EXACT trxId. `platform` narrows it to one collection;
 // without it all three are queried, which is still index-served — trxId carries
 // a unique index in every payment collection.
@@ -103,13 +139,17 @@ async function findPayment(trxId, platform) {
 // POST /v1/claims
 //   { trxId, expectedAmount, idempotencyKey, orderRef?, platform?, senderPhone? }
 // ---------------------------------------------------------------------------
-router.post('/claims', requireClient, async (req, res, next) => {
+router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
   const body   = req.body ?? {};
   const client = req.client;
 
   // --- Input ---
 
-  const trxId = String(body.trxId ?? '').trim();
+  // Normalised, not merely trimmed — and everything downstream uses this form:
+  // the payment lookup, the claim row, and the duplicate-key check. Two apps
+  // sending "pay-123" and "PAY123" must collide on the unique index, which they
+  // only do if both are stored the same way. See services/trxId.js.
+  const trxId = normaliseTrxId(body.trxId);
   if (!trxId) return refuse(res, 400, 'invalid_request', { detail: 'trxId is required' });
 
   const idempotencyKey = String(body.idempotencyKey ?? '').trim();
@@ -152,6 +192,16 @@ router.post('/claims', requireClient, async (req, res, next) => {
         });
         return refuse(res, 409, 'idempotency_key_reused', {
           detail: 'That idempotencyKey was used for a different transaction',
+        });
+      }
+      // A released claim must not replay as a success. The row still exists —
+      // releases are never deleted — so without this the app's retry after a
+      // refund would get `claimed: true` for a payment it no longer holds.
+      // A fresh idempotencyKey is the right way to claim it again.
+      if (existing.state !== 'claimed') {
+        return refuse(res, 409, 'claim_released', {
+          releasedAt: existing.releasedAt,
+          detail: 'That claim was released; start a new attempt with a new idempotencyKey',
         });
       }
       return res.status(200).json(serializeClaim(existing));
@@ -247,7 +297,7 @@ router.post('/claims', requireClient, async (req, res, next) => {
       // step 1 together. The winner's row is the answer; replay it.
       if (key.includes('idempotencyKey')) {
         const winner = await Claim.findOne({ clientId: client.clientId, idempotencyKey });
-        if (winner) return res.status(200).json(serializeClaim(winner));
+        if (winner?.state === 'claimed') return res.status(200).json(serializeClaim(winner));
       }
 
       // Otherwise the trxId partial-unique index: the payment is already spent.
