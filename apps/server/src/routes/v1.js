@@ -307,7 +307,11 @@ router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
       log.warn('CLAIM', 'already', {
         platform: found.platform, amount: payment.amount, trx: trxId, by: client.clientId,
       });
-      return refuse(res, 409, 'already_claimed', { claimedAt: held?.claimedAt ?? null });
+      // The holder can be released between the failed insert and this read,
+      // leaving no claimedAt. Omit the field then rather than send null: it is
+      // optional in the contract, and a typed client reads null as a malformed
+      // answer instead of already_claimed.
+      return refuse(res, 409, 'already_claimed', held?.claimedAt ? { claimedAt: held.claimedAt } : {});
     }
 
     log.info('CLAIM', 'claimed', {
