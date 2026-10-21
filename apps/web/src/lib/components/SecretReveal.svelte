@@ -1,6 +1,8 @@
 <script lang="ts">
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
+  import { browser } from '$app/environment';
+  import { PUBLIC_API_BASE_URL } from '$env/static/public';
 
   // Shown once, right after a secret is set or rotated, then gone.
   //
@@ -14,8 +16,14 @@
     rotated = false
   }: { clientId: string; secret: string; rotated?: boolean } = $props();
 
+  // Names match docs/client-integration.md, so a consuming app's code and this
+  // block agree. The URL is this dashboard's own API, the one /v1/claims lives on;
+  // an empty base means the API is served same-origin.
+  const gatewayUrl = PUBLIC_API_BASE_URL || (browser ? location.origin : '');
   const envBlock = $derived(
-    `PAYMENT_CLIENT_ID=${clientId}\nPAYMENT_CLIENT_SECRET=${secret}`
+    `SAKURA_PAYMENT_GATEWAY_URL=${gatewayUrl}\n` +
+      `SAKURA_PAYMENT_GATEWAY_CLIENT_ID=${clientId}\n` +
+      `SAKURA_PAYMENT_GATEWAY_SECRET=${secret}`
   );
 
   let copied = $state('');
@@ -72,8 +80,8 @@
       <button
         type="button"
         onclick={() => copy('env', envBlock)}
-        title="Copy both variables"
-        aria-label="Copy both variables"
+        title="Copy all variables"
+        aria-label="Copy all variables"
         class="flex-none cursor-pointer text-ink-soft hover:text-ink"
       >
         <Icon name={copied === 'env' ? 'check' : 'copy'} size={15} />
@@ -92,7 +100,7 @@
 
   <div class="flex justify-end">
     <Button variant="link" onclick={() => copy('env', envBlock)}>
-      {copied === 'env' ? 'Copied' : 'Copy both'}
+      {copied === 'env' ? 'Copied' : 'Copy all'}
     </Button>
   </div>
 </div>
