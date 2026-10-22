@@ -13,6 +13,8 @@ over a credentialed JSON API.
 
 - `apps/server` — Express 5 + Mongoose 9 JSON API. Entry `src/server.js`; app wiring in `src/app.js`.
 - `apps/web` — SvelteKit 2 / **Svelte 5 (runes)** dashboard SPA, deployed on Vercel (`adapter-vercel`, Node 24).
+- `packages/sdk` — `@sakura/pay`, the TypeScript client consuming apps install to call `/v1`.
+  Zero runtime deps. See its README (usage) and DESIGN.md.
 
 Each app has its own `package.json`; run commands from inside the app directory.
 
@@ -35,6 +37,11 @@ Web (`cd apps/web`):
 - `npm run dev` / `npm run build` / `npm run preview`
 - `npm run check` — `svelte-kit sync && svelte-check`. **Run this after any web change**; it's the
   type/lint gate and should report 0 errors, 0 warnings.
+
+SDK (`cd packages/sdk`):
+- `npm run check` — tsc + vitest + tsup. The only package here with a real test suite.
+- `npm run release` — check, then `npm pack` → `sakura-pay-<version>.tgz`, which consuming apps
+  vendor and install via `file:`.
 
 ## Environments
 
@@ -123,6 +130,10 @@ design is in [docs/payment-claims.md](docs/payment-claims.md).
 - A replay whose stored claim is **not** `state: 'claimed'` returns `409 claim_released`, never a
   `200`. The row survives a release, so replaying it as success would tell an app it still holds a
   payment that was refunded out from under it.
+- **`/v1` and the SDK change together.** Any change to a `/v1/claims` request rule, response field
+  or reason code updates `packages/sdk/src/contract/wire.ts` and
+  `src/resources/claims/interpret.ts` in the same commit, with a CHANGELOG entry and version bump.
+  The same holds for `services/trxId.js` and the SDK's `helpers/trxId.ts`.
 - The Claims page (`routes/(app)/claims/`) is keyset-paged on `{claimedAt:-1,_id:-1}`, and its
   `trxId` filter is an **exact** match — an anchored-prefix search here would rebuild the fishing
   surface that `/admin/api/payments` is being hardened against.
