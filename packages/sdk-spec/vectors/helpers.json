@@ -1,0 +1,155 @@
+{
+  "description": "Pure helpers: trxId normalisation, taka/poisha, claim keys, the background retry schedule, Retry-After parsing and in-call backoff.",
+
+  "normaliseTrxId": [
+    { "input": "8f3k2m9x01", "expected": "8F3K2M9X01" },
+    { "input": "8F3K 2M9X01", "expected": "8F3K2M9X01" },
+    { "input": "pay-123", "expected": "PAY123" },
+    { "input": "PAY_123", "expected": "PAY123" },
+    { "input": " abc​", "expected": "ABC" },
+    { "input": " ab cd﻿", "expected": "ABCD" },
+    { "input": "Ä-b-C", "expected": "BC" },
+    { "input": "२३", "expected": "" },
+    { "input": "", "expected": "" },
+    { "input": null, "expected": "" },
+    { "input": 12345, "expected": "12345" }
+  ],
+
+  "takaToPoisha": [
+    { "input": 1250, "expected": 125000 },
+    { "input": 1250.5, "expected": 125050 },
+    { "input": 12.34, "expected": 1234 },
+    { "input": 0.30000000000000004, "expected": 30 },
+    { "input": 2.675, "expected": 268 },
+    { "input": 0.125, "expected": 13 },
+    { "input": 0.005, "expected": 1 },
+    { "input": -0.125, "expected": -12 },
+    { "input": 0, "expected": 0 }
+  ],
+
+  "poishaToTaka": [
+    { "input": 125000, "expected": 1250 },
+    { "input": 125050, "expected": 1250.5 },
+    { "input": 1, "expected": 0.01 },
+    { "input": 7, "expected": 0.07 },
+    { "input": 0, "expected": 0 }
+  ],
+
+  "firstClaimKey": [
+    { "orderRef": "SB-10482", "expected": "SB-10482:1" },
+    { "orderRef": { "$repeat": "x", "times": 198 }, "expected": { "$concat": [{ "$repeat": "x", "times": 198 }, ":1"] } },
+    {
+      "orderRef": { "$repeat": "x", "times": 199 },
+      "throws": { "$concat": ["Claim key for ", { "$repeat": "x", "times": 199 }, " would exceed 200 characters."] }
+    },
+    { "orderRef": { "$repeat": "\ud83d\ude00", "times": 99 }, "expected": { "$concat": [{ "$repeat": "\ud83d\ude00", "times": 99 }, ":1"] } },
+    {
+      "orderRef": { "$repeat": "\ud83d\ude00", "times": 100 },
+      "throws": { "$concat": ["Claim key for ", { "$repeat": "\ud83d\ude00", "times": 100 }, " would exceed 200 characters."] }
+    },
+    { "orderRef": " ", "throws": "A claim key needs an order reference." },
+    { "orderRef": "", "throws": "A claim key needs an order reference." },
+    { "orderRef": "﻿", "throws": "A claim key needs an order reference." }
+  ],
+
+  "claimKeyFor": [
+    { "orderRef": "SB-1", "stored": null, "expected": "SB-1:1" },
+    { "orderRef": "SB-1", "stored": "", "expected": "SB-1:1" },
+    { "orderRef": "SB-1", "stored": "SB-1:3", "expected": "SB-1:3" }
+  ],
+
+  "nextClaimKey": [
+    { "orderRef": "SB-10482", "current": "SB-10482:1", "expected": "SB-10482:2" },
+    { "orderRef": "SB-10482", "current": "SB-10482:9", "expected": "SB-10482:10" },
+    { "orderRef": "SB-10482", "current": null, "expected": "SB-10482:2" },
+    { "orderRef": "SB-10482", "current": "", "expected": "SB-10482:2" },
+    { "orderRef": "A:B", "current": "A:B:4", "expected": "A:B:5" },
+    { "orderRef": "SB-1", "current": "OTHER:5", "expected": "SB-1:2" },
+    { "orderRef": "SB-1", "current": "SB-1:x", "expected": "SB-1:2" },
+    { "orderRef": "SB-1", "current": "SB-1:007", "expected": "SB-1:8" },
+    { "orderRef": "SB-1", "current": "SB-1:٣", "expected": "SB-1:2" },
+    { "orderRef": "SB-1", "current": "SB-1:3\n", "expected": "SB-1:2" },
+    { "orderRef": " ", "current": " :4", "throws": "A claim key needs an order reference." }
+  ],
+
+  "nextRetryDelaySeconds": [
+    { "attempts": 0, "granted": false, "expected": null },
+    { "attempts": 1, "granted": false, "expected": 5 },
+    { "attempts": 2, "granted": false, "expected": 10 },
+    { "attempts": 3, "granted": false, "expected": 20 },
+    { "attempts": 4, "granted": false, "expected": 30 },
+    { "attempts": 10, "granted": false, "expected": 30 },
+    { "attempts": 11, "granted": false, "expected": null },
+    { "attempts": 1, "granted": true, "expected": 5 },
+    { "attempts": 11, "granted": true, "expected": 600 },
+    { "attempts": 58, "granted": true, "expected": 600 },
+    { "attempts": 59, "granted": true, "expected": null },
+    { "attempts": 1, "granted": false, "retryAfterSeconds": 12.2, "expected": 13 },
+    { "attempts": 4, "granted": false, "retryAfterSeconds": 2, "expected": 30 },
+    { "attempts": 1, "granted": false, "retryAfterSeconds": 0, "expected": 5 },
+    { "attempts": 11, "granted": true, "retryAfterSeconds": 900, "expected": 900 },
+    { "attempts": 11, "granted": false, "retryAfterSeconds": 900, "expected": null },
+    { "attempts": 0.5, "granted": false, "expected": null },
+    { "attempts": 1.5, "granted": false, "expected": null },
+    { "attempts": 11.5, "granted": true, "expected": 600 }
+  ],
+
+  "isRetryable": [
+    { "outcome": "CLAIMED", "expected": false },
+    { "outcome": "PENDING_ARRIVAL", "expected": true },
+    { "outcome": "UNDERPAID", "expected": false },
+    { "outcome": "ALREADY_CLAIMED", "expected": false },
+    { "outcome": "RELEASED", "expected": false },
+    { "outcome": "REJECTED", "expected": false },
+    { "outcome": "MISCONFIGURED", "expected": false },
+    { "outcome": "UNAVAILABLE", "expected": true }
+  ],
+
+  "parseRetryAfter": [
+    { "header": "12", "expected": 12 },
+    { "header": "0", "expected": 0 },
+    { "header": "1.5", "expected": 1.5 },
+    { "header": " 7 ", "expected": 7 },
+    { "header": null, "expected": null },
+    { "header": "", "expected": null },
+    { "header": "soon", "expected": null },
+    { "header": "-5", "expected": null },
+    { "header": "1e2", "expected": null },
+    { "header": "0x10", "expected": null },
+    { "header": "Infinity", "expected": null },
+    { "header": "Thu, 22 Oct 2026 00:00:30 GMT", "nowMs": 1792627200000, "expected": 30 },
+    { "header": "Thu, 22 Oct 2026 00:00:30 GMT", "nowMs": 1792627200500, "expected": 30 },
+    { "header": "Thu, 22 Oct 2026 00:00:30 GMT", "nowMs": 1792627260000, "expected": 0 },
+    { "header": "Thu, 32 Oct 2026 00:00:30 GMT", "nowMs": 1792627200000, "expected": null },
+    { "header": "Thu, 22 oct 2026 00:00:30 GMT", "nowMs": 1792627200000, "expected": null },
+    { "header": "Thu, 22 Oct 2026 00:00:30 UTC", "nowMs": 1792627200000, "expected": null }
+  ],
+
+  "backoffMs": [
+    { "retry": 0, "random": 0.5, "expected": 250 },
+    { "retry": 1, "random": 0.5, "expected": 750 },
+    { "retry": 2, "random": 0.5, "expected": 2250 },
+    { "retry": 0, "random": 0, "expected": 188 },
+    { "retry": 0, "random": 1, "expected": 313 },
+    { "retry": 1, "random": 0.25, "expected": 656 }
+  ],
+
+  "parseIsoDate": [
+    { "input": "2026-10-21T08:14:02.000Z", "expected": "2026-10-21T08:14:02.000Z" },
+    { "input": "2026-10-21T08:14:02Z", "expected": "2026-10-21T08:14:02.000Z" },
+    { "input": "2026-10-21T08:14Z", "expected": "2026-10-21T08:14:00.000Z" },
+    { "input": "2026-10-21T08:14:02.5Z", "expected": "2026-10-21T08:14:02.500Z" },
+    { "input": "2026-10-21T08:14:02.123456Z", "expected": "2026-10-21T08:14:02.123Z" },
+    { "input": "2026-10-21T14:14:02.000+06:00", "expected": "2026-10-21T08:14:02.000Z" },
+    { "input": "2026-10-21t08:14:02z", "expected": null },
+    { "input": "2026-10-21T08:14:02", "expected": null },
+    { "input": "2026-10-21", "expected": null },
+    { "input": "2026-02-31T00:00:00Z", "expected": null },
+    { "input": "2026-13-01T00:00:00Z", "expected": null },
+    { "input": "2026-10-21T24:00:00Z", "expected": null },
+    { "input": "not a date", "expected": null },
+    { "input": "", "expected": null },
+    { "input": null, "expected": null },
+    { "input": 1792627200000, "expected": null }
+  ]
+}

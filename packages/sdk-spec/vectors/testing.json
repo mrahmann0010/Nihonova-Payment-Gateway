@@ -1,0 +1,57 @@
+{
+  "description": "The fake client apps use in their own tests. `respond` is a list of outcomes handed out in order (the last one repeats); `claims` is how many times claim() is called with the base request; `outcomes` is what each call returns.",
+
+  "fakeClient": [
+    {
+      "name": "hands out outcomes in order and repeats the last",
+      "respond": [{ "outcome": "PENDING_ARRIVAL" }, "$claimedOutcome"],
+      "claims": 3,
+      "enabled": true,
+      "clientId": "test-client",
+      "outcomes": [
+        { "outcome": "PENDING_ARRIVAL" },
+        { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 125000, "overpaidPoisha": 0, "underpaidPoisha": 0, "claimedAt": "2026-01-01T00:00:00.000Z", "replay": false },
+        { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 125000, "overpaidPoisha": 0, "underpaidPoisha": 0, "claimedAt": "2026-01-01T00:00:00.000Z", "replay": false }
+      ]
+    },
+    {
+      "name": "defaults to PENDING_ARRIVAL",
+      "respond": [],
+      "claims": 2,
+      "enabled": true,
+      "clientId": "test-client",
+      "outcomes": [{ "outcome": "PENDING_ARRIVAL" }, { "outcome": "PENDING_ARRIVAL" }]
+    },
+    {
+      "name": "takes a client ID",
+      "options": { "clientId": "shop-7" },
+      "respond": [{ "outcome": "ALREADY_CLAIMED", "claimedAt": null }],
+      "claims": 1,
+      "enabled": true,
+      "clientId": "shop-7",
+      "outcomes": [{ "outcome": "ALREADY_CLAIMED", "claimedAt": null }]
+    },
+    {
+      "name": "behaves like an unconfigured gateway when disabled",
+      "options": { "enabled": false },
+      "respond": ["$claimedOutcome"],
+      "claims": 1,
+      "enabled": false,
+      "clientId": null,
+      "outcomes": [{ "outcome": "UNAVAILABLE", "reason": "The payment gateway is not configured." }]
+    }
+  ],
+
+  "claimedOutcome": [
+    {
+      "name": "the defaults",
+      "overrides": {},
+      "expected": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 125000, "overpaidPoisha": 0, "underpaidPoisha": 0, "claimedAt": "2026-01-01T00:00:00.000Z", "replay": false }
+    },
+    {
+      "name": "with overrides",
+      "overrides": { "paidPoisha": 130000, "overpaidPoisha": 5000, "platform": "rocket", "replay": true },
+      "expected": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "rocket", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-01-01T00:00:00.000Z", "replay": true }
+    }
+  ]
+}

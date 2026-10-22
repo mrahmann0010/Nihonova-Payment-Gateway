@@ -1,0 +1,481 @@
+{
+  "description": "Claim requests and answers, without a network: what the SDK refuses to send, the exact body it sends, and how every gateway answer becomes an outcome. `patch` is applied over `baseRequest` (or `bodyPatch` over `claimedBody`); {\"$delete\": true} removes a field.",
+
+  "baseRequest": {
+    "trxId": "8F3K2M9X01",
+    "expectedPoisha": 125000,
+    "idempotencyKey": "SB-10482:1",
+    "orderRef": "SB-10482"
+  },
+
+  "claimedBody": {
+    "claimed": true,
+    "trxId": "8F3K2M9X01",
+    "platform": "bkash",
+    "amount": 1300,
+    "expectedAmount": 1250,
+    "overpaidBy": 50,
+    "orderRef": "SB-10482",
+    "idempotencyKey": "SB-10482:1",
+    "claimedAt": "2026-10-21T08:14:02.000Z",
+    "state": "claimed"
+  },
+
+  "requestProblem": [
+    { "name": "a good request", "patch": {}, "expected": null },
+    { "name": "a request with every optional field", "patch": { "platform": "nagad", "senderPhone": "01712345678" }, "expected": null },
+    { "name": "a null platform means no platform", "patch": { "platform": null }, "expected": null },
+    { "name": "a request accepting a shortfall", "patch": { "acceptShortfall": true }, "expected": null },
+    { "name": "trxId of only separators", "patch": { "trxId": " - " }, "expected": "The transaction ID is empty." },
+    { "name": "empty trxId", "patch": { "trxId": "" }, "expected": "The transaction ID is empty." },
+    { "name": "trxId of only non-ASCII letters", "patch": { "trxId": "ÄÖ" }, "expected": "The transaction ID is empty." },
+    { "name": "numeric trxId", "patch": { "trxId": 123 }, "expected": "The transaction ID is empty." },
+    { "name": "zero amount", "patch": { "expectedPoisha": 0 }, "expected": "The expected amount (0 poisha) is not a positive whole number." },
+    { "name": "negative amount", "patch": { "expectedPoisha": -100 }, "expected": "The expected amount (-100 poisha) is not a positive whole number." },
+    { "name": "fractional poisha", "patch": { "expectedPoisha": 12.5 }, "expected": "The expected amount (12.5 poisha) is not a positive whole number." },
+    { "name": "amount as a string", "patch": { "expectedPoisha": "1250" }, "expected": "The expected amount (1250 poisha) is not a positive whole number." },
+    { "name": "amount as a boolean", "patch": { "expectedPoisha": true }, "expected": "The expected amount (true poisha) is not a positive whole number." },
+    { "name": "amount as null", "patch": { "expectedPoisha": null }, "expected": "The expected amount (null poisha) is not a positive whole number." },
+    { "name": "blank key", "patch": { "idempotencyKey": " " }, "expected": "The claim key is empty." },
+    { "name": "key of only a byte-order mark", "patch": { "idempotencyKey": "﻿" }, "expected": "The claim key is empty." },
+    { "name": "numeric key", "patch": { "idempotencyKey": 7 }, "expected": "The claim key is empty." },
+    { "name": "key over the limit", "patch": { "idempotencyKey": { "$repeat": "x", "times": 201 } }, "expected": "The claim key is longer than 200 characters." },
+    {
+      "name": "key at the limit once trimmed",
+      "patch": { "idempotencyKey": { "$concat": [" ", { "$repeat": "x", "times": 200 }, " "] } },
+      "expected": null
+    },
+    {
+      "name": "the key limit counts UTF-16 units, as the server does",
+      "patch": { "idempotencyKey": { "$repeat": "\ud83d\ude00", "times": 101 } },
+      "expected": "The claim key is longer than 200 characters."
+    },
+    { "name": "100 emoji are exactly 200 units", "patch": { "idempotencyKey": { "$repeat": "\ud83d\ude00", "times": 100 } }, "expected": null },
+    { "name": "unknown wallet", "patch": { "platform": "upay" }, "expected": "The platform \"upay\" is not bkash, nagad or rocket." },
+    { "name": "wallet in capitals", "patch": { "platform": "BKASH" }, "expected": "The platform \"BKASH\" is not bkash, nagad or rocket." },
+    { "name": "non-ASCII wallet name", "patch": { "platform": "বিকাশ" }, "expected": "The platform \"বিকাশ\" is not bkash, nagad or rocket." }
+  ],
+
+  "toClaimBody": [
+    {
+      "name": "sends the total in taka, not poisha",
+      "patch": {},
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    },
+    {
+      "name": "keeps poisha as a fraction of a taka",
+      "patch": { "expectedPoisha": 125050 },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250.5, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    },
+    {
+      "name": "one poisha",
+      "patch": { "expectedPoisha": 7 },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 0.07, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    },
+    {
+      "name": "normalises the transaction ID the way the server does",
+      "patch": { "trxId": " 8f3k-2m9x 01 " },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    },
+    {
+      "name": "names the wallet only when asked to",
+      "patch": { "platform": "nagad" },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482", "platform": "nagad" }
+    },
+    {
+      "name": "sends the payer's phone when there is one",
+      "patch": { "senderPhone": " 01615951697 " },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482", "senderPhone": "01615951697" }
+    },
+    {
+      "name": "drops a blank phone",
+      "patch": { "senderPhone": "  " },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    },
+    {
+      "name": "trims the key and the order ref, and drops a blank ref",
+      "patch": { "idempotencyKey": " SB-1:1﻿", "orderRef": " " },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-1:1" }
+    },
+    {
+      "name": "drops a missing order ref",
+      "patch": { "orderRef": { "$delete": true } },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1" }
+    },
+    {
+      "name": "accepts a shortfall only when asked to, and says so last",
+      "patch": { "acceptShortfall": true, "senderPhone": "01615951697" },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482", "senderPhone": "01615951697", "acceptShortfall": true }
+    },
+    {
+      "name": "acceptShortfall false sends nothing",
+      "patch": { "acceptShortfall": false },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    },
+    {
+      "name": "anything but true is not an acceptance",
+      "patch": { "acceptShortfall": "yes" },
+      "expected": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482" }
+    }
+  ],
+
+  "interpret": [
+    {
+      "name": "a new claim is CLAIMED, taka back to poisha",
+      "status": 201, "bodyPatch": {}, "expectedPoisha": 125000,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "logs": []
+    },
+    {
+      "name": "a 200 is a replay of our own earlier claim",
+      "status": 200, "bodyPatch": {}, "expectedPoisha": 125000,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": true },
+      "logs": []
+    },
+    {
+      "name": "float taka rounds to the nearest poisha",
+      "status": 201, "bodyPatch": { "amount": 12.34, "overpaidBy": 0 }, "expectedPoisha": 1234,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 1234, "overpaidPoisha": 0, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "logs": []
+    },
+    {
+      "name": "a missing overpaidBy is zero",
+      "status": 201, "bodyPatch": { "amount": 1250, "overpaidBy": { "$delete": true } }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 125000, "overpaidPoisha": 0, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "logs": []
+    },
+    {
+      "name": "an offset claimedAt is read as UTC",
+      "status": 201, "bodyPatch": { "claimedAt": "2026-10-21T14:14:02+06:00" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "logs": []
+    },
+    {
+      "name": "a 'claimed' answer below the total is refused, as a second look",
+      "status": 201, "bodyPatch": { "amount": 1000 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": 100000 },
+      "logs": ["Payment gateway claimed 8F3K2M9X01 for 100000 poisha against 125000 expected"]
+    },
+    {
+      "name": "an accepted shortfall is CLAIMED, with what is still owed",
+      "status": 201, "bodyPatch": { "amount": 900, "overpaidBy": 0, "underpaidBy": 350 }, "expectedPoisha": 125000, "acceptShortfall": true,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 90000, "overpaidPoisha": 0, "underpaidPoisha": 35000, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "logs": []
+    },
+    {
+      "name": "the shortfall is our own sum, not the body's",
+      "status": 200, "bodyPatch": { "amount": 900, "overpaidBy": 0, "underpaidBy": 1 }, "expectedPoisha": 125050, "acceptShortfall": true,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 90000, "overpaidPoisha": 0, "underpaidPoisha": 35050, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": true },
+      "logs": []
+    },
+    {
+      "name": "accepting a shortfall changes nothing when the payment is in full",
+      "status": 201, "bodyPatch": {}, "expectedPoisha": 125000, "acceptShortfall": true,
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "logs": []
+    },
+
+    {
+      "name": "success with no platform asks again",
+      "status": 201, "bodyPatch": { "platform": { "$delete": true } }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: platform is undefined"]
+    },
+    {
+      "name": "success with a null platform asks again",
+      "status": 201, "bodyPatch": { "platform": null }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: platform is null"]
+    },
+    {
+      "name": "success with an unknown platform asks again",
+      "status": 201, "bodyPatch": { "platform": "upay" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: platform is \"upay\""]
+    },
+    {
+      "name": "success with an object platform asks again",
+      "status": 201, "bodyPatch": { "platform": { "name": "bkash", "ids": [1, 2] } }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: platform is {\"name\":\"bkash\",\"ids\":[1,2]}"]
+    },
+    {
+      "name": "success with an empty trxId asks again",
+      "status": 201, "bodyPatch": { "trxId": "" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: trxId is missing"]
+    },
+    {
+      "name": "success with a string amount asks again",
+      "status": 201, "bodyPatch": { "amount": "1300" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: amount is not a non-negative number"]
+    },
+    {
+      "name": "success with a boolean amount asks again",
+      "status": 201, "bodyPatch": { "amount": true }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: amount is not a non-negative number"]
+    },
+    {
+      "name": "success with a negative amount asks again",
+      "status": 201, "bodyPatch": { "amount": -1 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: amount is not a non-negative number"]
+    },
+    {
+      "name": "success with a null overpaidBy asks again",
+      "status": 201, "bodyPatch": { "overpaidBy": null }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: overpaidBy is not a non-negative number"]
+    },
+    {
+      "name": "success with a negative overpaidBy asks again",
+      "status": 201, "bodyPatch": { "overpaidBy": -1 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: overpaidBy is not a non-negative number"]
+    },
+    {
+      "name": "success with an unreadable claimedAt asks again",
+      "status": 201, "bodyPatch": { "claimedAt": "not a date" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: claimedAt is not a date"]
+    },
+    {
+      "name": "success with a claimedAt that has no time zone asks again",
+      "status": 201, "bodyPatch": { "claimedAt": "2026-10-21T08:14:02" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway's answer could not be read." },
+      "logs": ["Payment gateway sent an unreadable success body: claimedAt is not a date"]
+    },
+    {
+      "name": "claimed:\"true\" as a string is not a grant",
+      "status": 201, "bodyPatch": { "claimed": "true" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (201)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 201 (no reason)"]
+    },
+    {
+      "name": "a 2xx without claimed:true is not a grant",
+      "status": 200, "body": { "ok": true }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (200)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 200 (no reason)"]
+    },
+    {
+      "name": "claimed:true on a 202 is not a grant",
+      "status": 202, "bodyPatch": {}, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (202)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 202 (no reason)"]
+    },
+
+    {
+      "name": "not_found is PENDING_ARRIVAL",
+      "status": 404, "body": { "claimed": false, "reason": "not_found", "retryable": true }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "PENDING_ARRIVAL" },
+      "logs": []
+    },
+    {
+      "name": "already_claimed carries when",
+      "status": 409, "body": { "claimed": false, "reason": "already_claimed", "claimedAt": "2026-10-20T10:00:00.000Z" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "ALREADY_CLAIMED", "claimedAt": "2026-10-20T10:00:00.000Z" },
+      "logs": []
+    },
+    {
+      "name": "already_claimed without a time is an unknown time",
+      "status": 409, "body": { "claimed": false, "reason": "already_claimed" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "ALREADY_CLAIMED", "claimedAt": null },
+      "logs": []
+    },
+    {
+      "name": "already_claimed with a bad time is an unknown time",
+      "status": 409, "body": { "claimed": false, "reason": "already_claimed", "claimedAt": "yesterday" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "ALREADY_CLAIMED", "claimedAt": null },
+      "logs": []
+    },
+    {
+      "name": "claim_released carries when",
+      "status": 409, "body": { "claimed": false, "reason": "claim_released", "releasedAt": "2026-10-20T11:00:00.000Z" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "RELEASED", "releasedAt": "2026-10-20T11:00:00.000Z" },
+      "logs": []
+    },
+    {
+      "name": "claim_released without a time",
+      "status": 409, "body": { "claimed": false, "reason": "claim_released" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "RELEASED", "releasedAt": null },
+      "logs": []
+    },
+    {
+      "name": "idempotency_key_reused is our bug",
+      "status": 409, "body": { "claimed": false, "reason": "idempotency_key_reused" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The claim key was already used with a different transaction ID." },
+      "logs": ["Payment gateway refused a reused idempotency key with a different trxId"]
+    },
+    {
+      "name": "ambiguous_trx",
+      "status": 409, "body": { "claimed": false, "reason": "ambiguous_trx", "platforms": ["bkash", "nagad"] }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "REJECTED", "rejection": "AMBIGUOUS", "reason": "This transaction ID exists on more than one wallet; the wallet must be named." },
+      "logs": []
+    },
+    {
+      "name": "outside_claim_window",
+      "status": 410, "body": { "claimed": false, "reason": "outside_claim_window", "claimWindowDays": 30 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "REJECTED", "rejection": "TOO_OLD", "reason": "The payment is older than this shop's claim window." },
+      "logs": []
+    },
+    {
+      "name": "amount_mismatch converts both amounts",
+      "status": 422, "body": { "claimed": false, "reason": "amount_mismatch", "expected": 1250, "actual": 900 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": 90000 },
+      "logs": []
+    },
+    {
+      "name": "amount_mismatch without amounts falls back to the order total",
+      "status": 422, "body": { "claimed": false, "reason": "amount_mismatch" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": null },
+      "logs": []
+    },
+    {
+      "name": "amount_mismatch is UNDERPAID even after asking to accept, as from a gateway that predates acceptShortfall",
+      "status": 422, "body": { "claimed": false, "reason": "amount_mismatch", "expected": 1250, "actual": 900 }, "expectedPoisha": 125000, "acceptShortfall": true,
+      "outcome": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": 90000 },
+      "logs": []
+    },
+    {
+      "name": "amount_mismatch with string amounts falls back",
+      "status": 422, "body": { "claimed": false, "reason": "amount_mismatch", "expected": "1250", "actual": "900" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": null },
+      "logs": []
+    },
+    {
+      "name": "exceeds_max_claim",
+      "status": 422, "body": { "claimed": false, "reason": "exceeds_max_claim", "max": 5000 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "REJECTED", "rejection": "OVER_LIMIT", "reason": "The payment is above this shop's per-claim limit." },
+      "logs": []
+    },
+    {
+      "name": "sender_mismatch",
+      "status": 422, "body": { "claimed": false, "reason": "sender_mismatch" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "REJECTED", "rejection": "SENDER_MISMATCH", "reason": "The payer's phone number does not match." },
+      "logs": []
+    },
+    {
+      "name": "rate_limited takes the body's wait",
+      "status": 429, "body": { "claimed": false, "reason": "rate_limited", "retryAfter": 12 }, "expectedPoisha": 125000, "retryAfterSeconds": 30,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop.", "retryAfterSeconds": 12 },
+      "logs": []
+    },
+    {
+      "name": "rate_limited falls back to the header",
+      "status": 429, "body": { "claimed": false, "reason": "rate_limited" }, "expectedPoisha": 125000, "retryAfterSeconds": 30,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop.", "retryAfterSeconds": 30 },
+      "logs": []
+    },
+    {
+      "name": "rate_limited with no wait at all",
+      "status": 429, "body": { "claimed": false, "reason": "rate_limited" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop." },
+      "logs": []
+    },
+    {
+      "name": "invalid_request with a string detail",
+      "status": 400, "body": { "claimed": false, "reason": "invalid_request", "detail": "trxId is required" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway refused the request as malformed: trxId is required" },
+      "logs": ["Payment gateway refused the claim as malformed: trxId is required"]
+    },
+    {
+      "name": "invalid_request with an object detail",
+      "status": 400, "body": { "claimed": false, "reason": "invalid_request", "detail": { "field": "senderPhone", "max": 20 } }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway refused the request as malformed: {\"field\":\"senderPhone\",\"max\":20}" },
+      "logs": ["Payment gateway refused the claim as malformed: {\"field\":\"senderPhone\",\"max\":20}"]
+    },
+    {
+      "name": "invalid_request with no detail",
+      "status": 400, "body": { "claimed": false, "reason": "invalid_request" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway refused the request as malformed: no detail given" },
+      "logs": ["Payment gateway refused the claim as malformed: no detail given"]
+    },
+    {
+      "name": "invalid_request with a null detail",
+      "status": 400, "body": { "claimed": false, "reason": "invalid_request", "detail": null }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway refused the request as malformed: null" },
+      "logs": ["Payment gateway refused the claim as malformed: null"]
+    },
+    {
+      "name": "unauthenticated",
+      "status": 401, "body": { "claimed": false, "reason": "unauthenticated" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway did not accept this shop's credential." },
+      "logs": ["Payment gateway refused our credential: unauthenticated"]
+    },
+    {
+      "name": "client_inactive",
+      "status": 403, "body": { "claimed": false, "reason": "client_inactive" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "This shop is deactivated on the payment gateway." },
+      "logs": ["Payment gateway refused our credential: client_inactive"]
+    },
+
+    {
+      "name": "every 5xx is unavailable, whatever the body says",
+      "status": 503, "body": { "claimed": false, "reason": "not_found" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway answered 503." },
+      "logs": []
+    },
+    {
+      "name": "a 5xx HTML page is unavailable",
+      "status": 500, "body": "<html>", "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway answered 500." },
+      "logs": []
+    },
+    {
+      "name": "a 5xx success body is still unavailable",
+      "status": 500, "bodyPatch": {}, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway answered 500." },
+      "logs": []
+    },
+    {
+      "name": "a bare 429 uses the header",
+      "status": 429, "body": null, "expectedPoisha": 125000, "retryAfterSeconds": 30,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop.", "retryAfterSeconds": 30 },
+      "logs": []
+    },
+    {
+      "name": "a bare 429 with no header",
+      "status": 429, "body": null, "expectedPoisha": 125000,
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop." },
+      "logs": []
+    },
+    {
+      "name": "an unknown reason never grants",
+      "status": 418, "body": { "claimed": false, "reason": "teapot" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (418, teapot)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 418 teapot"]
+    },
+    {
+      "name": "a wrong URL: the host's own 404 page",
+      "status": 404, "body": null, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (404)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 404 (no reason)"]
+    },
+    {
+      "name": "a non-string reason is no reason",
+      "status": 409, "body": { "claimed": false, "reason": 42 }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (409)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 409 (no reason)"]
+    },
+    {
+      "name": "an empty reason is a reason, but not a known one",
+      "status": 409, "body": { "claimed": false, "reason": "" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (409)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 409 "]
+    },
+    {
+      "name": "an array body is no body",
+      "status": 409, "body": ["already_claimed"], "expectedPoisha": 125000,
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (409)." },
+      "logs": ["Payment gateway sent an answer outside its contract: 409 (no reason)"]
+    },
+    {
+      "name": "a known reason on an odd status still counts",
+      "status": 400, "body": { "claimed": false, "reason": "already_claimed" }, "expectedPoisha": 125000,
+      "outcome": { "outcome": "ALREADY_CLAIMED", "claimedAt": null },
+      "logs": []
+    }
+  ]
+}

@@ -177,7 +177,8 @@ export interface ClientInput {
 
 // One row of the redemption ledger (mirrors serialize() in src/routes/claims.js).
 // `amount` is what actually arrived; `expectedAmount` is what the business asked
-// for. They differ only upward — underpayment is refused at claim time.
+// for. Usually they differ only upward. `underpaidBy` is non-zero only when the
+// business accepted a short payment on purpose (`acceptShortfall`).
 export interface Claim {
   id: string;
   trxId: string;
@@ -187,6 +188,7 @@ export interface Claim {
 
   expectedAmount: number;
   overpaidBy: number;
+  underpaidBy: number;
 
   clientId: string;
   orderRef: string;

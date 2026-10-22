@@ -13,6 +13,13 @@ over a credentialed JSON API.
 
 - `apps/server` — Express 5 + Mongoose 9 JSON API. Entry `src/server.js`; app wiring in `src/app.js`.
 - `apps/web` — SvelteKit 2 / **Svelte 5 (runes)** dashboard SPA, deployed on Vercel (`adapter-vercel`, Node 24).
+- `packages/sdk` — `@project-sakura/pay`, the TypeScript client consuming apps install to call `/v1`.
+  Zero runtime deps. See its README (usage) and DESIGN.md.
+- `packages/sdk-python` — `sakura-pay` on PyPI, the Python twin (sync + asyncio, httpx). Same
+  outcomes, messages, retries and helpers as the TS SDK, message for message.
+- `packages/sdk-spec` — what keeps the two identical: `spec.json` (constants, messages, version,
+  generated into both), `vectors/` (exact test cases both SDKs run), `contract/` (end-to-end
+  scenarios + the harness both contract suites use). Its README is the change process.
 
 Each app has its own `package.json`; run commands from inside the app directory.
 
@@ -35,6 +42,19 @@ Web (`cd apps/web`):
 - `npm run dev` / `npm run build` / `npm run preview`
 - `npm run check` — `svelte-kit sync && svelte-check`. **Run this after any web change**; it's the
   type/lint gate and should report 0 errors, 0 warnings.
+
+SDKs (`cd packages/sdk-spec` — drives both):
+- `npm run generate` — `spec.json` → `packages/sdk/src/contract/spec.generated.ts`,
+  `packages/sdk-python/src/sakura_pay/_spec.py` and the npm `version`. Never edit those by hand.
+- `npm run check` — generated files current, the server's trxId rule against the vectors, then the
+  TS check (tsc + vitest + tsup) and the Python check (ruff + mypy strict + pytest + build). The
+  only real test suites in the repo. Python needs `uv`.
+- `npm run test:contract` — both SDKs against a real `apps/server` + Docker MongoDB, in a throwaway
+  `sakura-pay-contract` database. **Run this after any change to `/v1` or the claim models**; it is
+  the closest thing the server has to an integration test.
+- `npm run release` — publish npm `@project-sakura/pay` AND PyPI `sakura-pay` at `spec.json`'s
+  version. Bump it, `npm run generate`, add a `packages/sdk/CHANGELOG.md` entry (shared by both)
+  first; a version can't be reused on either registry.
 
 ## Environments
 
@@ -112,8 +132,9 @@ design is in [docs/payment-claims.md](docs/payment-claims.md).
   destroys the audit trail. The partial index is what lets a released claim free the payment.
 - `{ clientId: 1, idempotencyKey: 1 }` unique makes a caller's own retry replay its original
   response instead of colliding with itself. Without it an app's timeout-retry looks like theft.
-- Policy: underpayment is refused, overpayment claims and records `overpaidBy`, and sender binding
-  is the per-client `requireSenderMatch` flag (default off). The `reason` strings in the error
+- Policy: underpayment is refused unless the request sends `acceptShortfall: true` (a person in the
+  consuming app chose to take it; the claim then records `underpaidBy`), overpayment claims and
+  records `overpaidBy`, and sender binding is the per-client `requireSenderMatch` flag (default off). The `reason` strings in the error
   taxonomy are a published contract — consuming apps switch on them, so don't rename one.
 - **Release is admin-only** (`routes/claims.js`, `POST /admin/api/claims/:id/release`, behind
   `requireAdmin` + `csrfGuard`) and requires a reason. It's the one operation that makes a spent
@@ -123,6 +144,13 @@ design is in [docs/payment-claims.md](docs/payment-claims.md).
 - A replay whose stored claim is **not** `state: 'claimed'` returns `409 claim_released`, never a
   `200`. The row survives a release, so replaying it as success would tell an app it still holds a
   payment that was refunded out from under it.
+- **`/v1` and both SDKs change together.** Any change to a `/v1/claims` request rule, response
+  field or reason code updates, in one commit: `packages/sdk-spec` (vectors/scenarios, and
+  `spec.json` for a new reason or message), the TS SDK (`contract/wire.ts`,
+  `resources/claims/interpret.ts`) and the Python SDK (`_interpret.py`), with a CHANGELOG entry and
+  version bump. The same holds for `services/trxId.js`, which is checked against the SDKs' trxId
+  vectors. **Never change payment behaviour in one SDK only** — start from a vector, so both fail
+  until both are fixed.
 - The Claims page (`routes/(app)/claims/`) is keyset-paged on `{claimedAt:-1,_id:-1}`, and its
   `trxId` filter is an **exact** match — an anchored-prefix search here would rebuild the fishing
   surface that `/admin/api/payments` is being hardened against.

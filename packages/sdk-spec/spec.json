@@ -1,0 +1,145 @@
+{
+  "$comment": "The single source of truth for both SDKs. Edit this, then run `npm run generate` in packages/sdk-spec. Never edit the generated files (packages/sdk/src/contract/spec.generated.ts, packages/sdk-python/src/sakura_pay/_spec.py) by hand.",
+
+  "version": "0.2.0",
+
+  "platforms": ["bkash", "nagad", "rocket"],
+
+  "reasons": [
+    "not_found",
+    "already_claimed",
+    "claim_released",
+    "idempotency_key_reused",
+    "ambiguous_trx",
+    "outside_claim_window",
+    "amount_mismatch",
+    "exceeds_max_claim",
+    "sender_mismatch",
+    "rate_limited",
+    "invalid_request",
+    "unauthenticated",
+    "client_inactive"
+  ],
+
+  "outcomes": [
+    "CLAIMED",
+    "PENDING_ARRIVAL",
+    "UNDERPAID",
+    "ALREADY_CLAIMED",
+    "RELEASED",
+    "REJECTED",
+    "MISCONFIGURED",
+    "UNAVAILABLE"
+  ],
+
+  "retryableOutcomes": ["PENDING_ARRIVAL", "UNAVAILABLE"],
+
+  "rejections": ["TOO_OLD", "OVER_LIMIT", "SENDER_MISMATCH", "AMBIGUOUS"],
+
+  "limits": {
+    "maxIdempotencyKeyLength": 200,
+    "maxOrderRefLength": 200
+  },
+
+  "defaults": {
+    "timeoutMs": 5000,
+    "totalBudgetMs": 8000,
+    "maxRetries": 1
+  },
+
+  "backoff": {
+    "$comment": "In-call retry wait: baseMs * factor^retry, scaled by a jitter in [1 - jitter, 1 + jitter). An attempt is only started with at least minAttemptMs of budget left.",
+    "baseMs": 250,
+    "factor": 3,
+    "jitter": 0.25,
+    "minAttemptMs": 250
+  },
+
+  "retrySchedule": {
+    "fastDelaysSeconds": [5, 10, 20, 30, 30, 30, 30, 30, 30, 30],
+    "lateIntervalSeconds": 600,
+    "lateAttempts": 48
+  },
+
+  "localHosts": ["localhost", "127.0.0.1", "[::1]", "::1"],
+
+  "$comment_whitespace": "What `trim` removes, in every language: exactly JavaScript's String.prototype.trim set, so Python's wider str.strip() cannot disagree.",
+  "whitespace": "\t\n\u000b\f\r                  　﻿",
+
+  "$comment_configFields": "Config option names per language. Messages are written with the camelCase names; each SDK swaps in its own spelling.",
+  "configFields": {
+    "baseUrl": "base_url",
+    "clientId": "client_id",
+    "secret": "secret",
+    "timeoutMs": "timeout_ms",
+    "totalBudgetMs": "total_budget_ms",
+    "maxRetries": "max_retries"
+  },
+
+  "testing": {
+    "claimedOutcomeDefaults": {
+      "outcome": "CLAIMED",
+      "trxId": "8F3K2M9X01",
+      "platform": "bkash",
+      "paidPoisha": 125000,
+      "overpaidPoisha": 0,
+      "underpaidPoisha": 0,
+      "claimedAt": "2026-01-01T00:00:00.000Z",
+      "replay": false
+    }
+  },
+
+  "$comment_messages": "Every string the SDKs return or log. {name} is filled from a variable; numbers print the way JavaScript's String() prints them.",
+  "messages": {
+    "configIncomplete": "Payment gateway config is incomplete: missing {missing}. Set all three or none.",
+    "baseUrlNotUrl": "Payment gateway baseUrl is not a URL: {raw}",
+    "baseUrlNotHttps": "Payment gateway baseUrl must use https (plain http is allowed only for localhost).",
+    "baseUrlNotPlain": "Payment gateway baseUrl must be a plain origin/path, without credentials, query or fragment.",
+    "clientIdHasDot": "Payment gateway clientId must not contain a dot.",
+    "notPositive": "Payment gateway {name} must be a positive number.",
+    "notNonNegativeInt": "Payment gateway {name} must be a whole number ≥ 0.",
+
+    "trxIdEmpty": "The transaction ID is empty.",
+    "amountNotPositiveInt": "The expected amount ({value} poisha) is not a positive whole number.",
+    "keyEmpty": "The claim key is empty.",
+    "keyTooLong": "The claim key is longer than {max} characters.",
+    "platformInvalid": "The platform {value} is not bkash, nagad or rocket.",
+
+    "keyNeedsOrderRef": "A claim key needs an order reference.",
+    "keyWouldBeTooLong": "Claim key for {orderRef} would exceed {max} characters.",
+
+    "notConfigured": "The payment gateway is not configured.",
+    "refusingBadClaimLog": "Refusing to send a bad claim for {orderRef}: {problem}",
+    "unexpectedErrorLog": "Payment gateway claim failed unexpectedly: {error}",
+    "unexpectedError": "Unexpected error: {error}",
+    "timedOut": "The payment gateway did not answer within {timeoutMs} ms.",
+    "unreachable": "The payment gateway could not be reached: {message}",
+
+    "gatewayAnswered": "The payment gateway answered {status}.",
+    "unreadableSuccessLog": "Payment gateway sent an unreadable success body: {problem}",
+    "unreadableSuccess": "The payment gateway's answer could not be read.",
+    "underpaidGrantLog": "Payment gateway claimed {trxId} for {paidPoisha} poisha against {expectedPoisha} expected",
+    "rejectedAmbiguous": "This transaction ID exists on more than one wallet; the wallet must be named.",
+    "rejectedTooOld": "The payment is older than this shop's claim window.",
+    "rejectedOverLimit": "The payment is above this shop's per-claim limit.",
+    "rejectedSenderMismatch": "The payer's phone number does not match.",
+    "rateLimited": "The payment gateway is rate-limiting this shop.",
+    "keyReusedLog": "Payment gateway refused a reused idempotency key with a different trxId",
+    "keyReused": "The claim key was already used with a different transaction ID.",
+    "invalidRequestLog": "Payment gateway refused the claim as malformed: {detail}",
+    "invalidRequest": "The payment gateway refused the request as malformed: {detail}",
+    "noDetail": "no detail given",
+    "credentialRefusedLog": "Payment gateway refused our credential: {reason}",
+    "unauthenticated": "The payment gateway did not accept this shop's credential.",
+    "clientInactive": "This shop is deactivated on the payment gateway.",
+    "outsideContractLog": "Payment gateway sent an answer outside its contract: {status} {reason}",
+    "noReason": "(no reason)",
+    "unexpectedAnswer": "The payment gateway sent an unexpected answer ({detail}).",
+
+    "bodyTrxIdMissing": "trxId is missing",
+    "bodyPlatformInvalid": "platform is {value}",
+    "bodyAmountInvalid": "amount is not a non-negative number",
+    "bodyOverpaidInvalid": "overpaidBy is not a non-negative number",
+    "bodyClaimedAtInvalid": "claimedAt is not a date"
+  }
+}

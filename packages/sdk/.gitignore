@@ -1,0 +1,3 @@
+# `npm pack` output — the release tarball is copied into each consuming app,
+# never committed here.
+*.tgz

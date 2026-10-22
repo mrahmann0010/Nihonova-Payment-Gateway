@@ -1,0 +1,104 @@
+{
+  "description": "Client construction. `config` is applied over `baseConfig`; a case either resolves (`resolved`) or fails at construction with exactly `error`. Option names are camelCase here; each SDK maps them to its own spelling (spec.json configFields), in messages too.",
+
+  "baseConfig": {
+    "baseUrl": "https://gateway.example",
+    "clientId": "sakura-book",
+    "secret": "s3cret"
+  },
+
+  "cases": [
+    {
+      "name": "a complete config",
+      "config": {},
+      "resolved": {
+        "enabled": true,
+        "clientId": "sakura-book",
+        "claimsUrl": "https://gateway.example/v1/claims",
+        "authorization": "Bearer sakura-book.s3cret",
+        "policy": { "timeoutMs": 5000, "totalBudgetMs": 8000, "maxRetries": 1 }
+      }
+    },
+    {
+      "name": "a secret with dots is fine; only the client ID may not have one",
+      "config": { "secret": "s3cret.with.dots" },
+      "resolved": {
+        "enabled": true,
+        "clientId": "sakura-book",
+        "claimsUrl": "https://gateway.example/v1/claims",
+        "authorization": "Bearer sakura-book.s3cret.with.dots",
+        "policy": { "timeoutMs": 5000, "totalBudgetMs": 8000, "maxRetries": 1 }
+      }
+    },
+    {
+      "name": "values are trimmed",
+      "config": { "baseUrl": "  https://gateway.example/  ", "clientId": " sakura-book\n", "secret": "\ts3cret " },
+      "resolved": {
+        "enabled": true,
+        "clientId": "sakura-book",
+        "claimsUrl": "https://gateway.example/v1/claims",
+        "authorization": "Bearer sakura-book.s3cret",
+        "policy": { "timeoutMs": 5000, "totalBudgetMs": 8000, "maxRetries": 1 }
+      }
+    },
+    {
+      "name": "custom timeouts and retries",
+      "config": { "timeoutMs": 2500.5, "totalBudgetMs": 4000, "maxRetries": 0 },
+      "resolved": {
+        "enabled": true,
+        "clientId": "sakura-book",
+        "claimsUrl": "https://gateway.example/v1/claims",
+        "authorization": "Bearer sakura-book.s3cret",
+        "policy": { "timeoutMs": 2500.5, "totalBudgetMs": 4000, "maxRetries": 0 }
+      }
+    },
+
+    { "name": "trailing slash", "config": { "baseUrl": "https://gateway.example/" }, "claimsUrl": "https://gateway.example/v1/claims" },
+    { "name": "path prefix", "config": { "baseUrl": "https://example.com/gateway/" }, "claimsUrl": "https://example.com/gateway/v1/claims" },
+    { "name": "several trailing slashes", "config": { "baseUrl": "https://example.com/gateway//" }, "claimsUrl": "https://example.com/gateway/v1/claims" },
+    { "name": "scheme and host are lowercased", "config": { "baseUrl": "HTTPS://Gateway.EXAMPLE" }, "claimsUrl": "https://gateway.example/v1/claims" },
+    { "name": "the default port is dropped", "config": { "baseUrl": "https://gateway.example:443/" }, "claimsUrl": "https://gateway.example/v1/claims" },
+    { "name": "another port is kept", "config": { "baseUrl": "https://gateway.example:8443" }, "claimsUrl": "https://gateway.example:8443/v1/claims" },
+    { "name": "an empty query or fragment is no query", "config": { "baseUrl": "https://gateway.example/?#" }, "claimsUrl": "https://gateway.example/v1/claims" },
+    { "name": "http on localhost", "config": { "baseUrl": "http://localhost:3001" }, "claimsUrl": "http://localhost:3001/v1/claims" },
+    { "name": "http on LOCALHOST", "config": { "baseUrl": "http://LOCALHOST:3001" }, "claimsUrl": "http://localhost:3001/v1/claims" },
+    { "name": "http on 127.0.0.1", "config": { "baseUrl": "http://127.0.0.1:3001" }, "claimsUrl": "http://127.0.0.1:3001/v1/claims" },
+    { "name": "http on ::1", "config": { "baseUrl": "http://[::1]:3001" }, "claimsUrl": "http://[::1]:3001/v1/claims" },
+
+    {
+      "name": "no gateway at all",
+      "config": { "baseUrl": null, "clientId": "", "secret": null },
+      "resolved": { "enabled": false }
+    },
+    {
+      "name": "only whitespace is no gateway",
+      "config": { "baseUrl": " ", "clientId": "\t", "secret": " " },
+      "resolved": { "enabled": false }
+    },
+    {
+      "name": "no gateway ignores the other options",
+      "config": { "baseUrl": null, "clientId": null, "secret": null, "timeoutMs": -1 },
+      "resolved": { "enabled": false }
+    },
+
+    { "name": "half a config", "config": { "secret": null }, "error": "Payment gateway config is incomplete: missing secret. Set all three or none." },
+    { "name": "half a config, two missing", "config": { "baseUrl": " ", "clientId": "" }, "error": "Payment gateway config is incomplete: missing baseUrl, clientId. Set all three or none." },
+    { "name": "plain http elsewhere", "config": { "baseUrl": "http://gateway.example" }, "error": "Payment gateway baseUrl must use https (plain http is allowed only for localhost)." },
+    { "name": "another scheme", "config": { "baseUrl": "ftp://gateway.example" }, "error": "Payment gateway baseUrl must use https (plain http is allowed only for localhost)." },
+    { "name": "no scheme", "config": { "baseUrl": "gateway.example" }, "error": "Payment gateway baseUrl is not a URL: gateway.example" },
+    { "name": "no host", "config": { "baseUrl": "https://" }, "error": "Payment gateway baseUrl is not a URL: https://" },
+    { "name": "a bad port", "config": { "baseUrl": "https://gateway.example:99999" }, "error": "Payment gateway baseUrl is not a URL: https://gateway.example:99999" },
+    { "name": "credentials in the URL", "config": { "baseUrl": "https://u:p@gateway.example" }, "error": "Payment gateway baseUrl must be a plain origin/path, without credentials, query or fragment." },
+    { "name": "a query", "config": { "baseUrl": "https://gateway.example?x=1" }, "error": "Payment gateway baseUrl must be a plain origin/path, without credentials, query or fragment." },
+    { "name": "a fragment", "config": { "baseUrl": "https://gateway.example/#top" }, "error": "Payment gateway baseUrl must be a plain origin/path, without credentials, query or fragment." },
+    { "name": "a client ID with a dot", "config": { "clientId": "sakura.book" }, "error": "Payment gateway clientId must not contain a dot." },
+    { "name": "the URL is checked before the client ID", "config": { "baseUrl": "http://gateway.example", "clientId": "sakura.book" }, "error": "Payment gateway baseUrl must use https (plain http is allowed only for localhost)." },
+    { "name": "zero timeout", "config": { "timeoutMs": 0 }, "error": "Payment gateway timeoutMs must be a positive number." },
+    { "name": "negative budget", "config": { "totalBudgetMs": -1 }, "error": "Payment gateway totalBudgetMs must be a positive number." },
+    { "name": "timeout as a string", "config": { "timeoutMs": "5000" }, "error": "Payment gateway timeoutMs must be a positive number." },
+    { "name": "timeout as a boolean", "config": { "timeoutMs": true }, "error": "Payment gateway timeoutMs must be a positive number." },
+    { "name": "fractional retries", "config": { "maxRetries": 1.5 }, "error": "Payment gateway maxRetries must be a whole number ≥ 0." },
+    { "name": "negative retries", "config": { "maxRetries": -1 }, "error": "Payment gateway maxRetries must be a whole number ≥ 0." },
+    { "name": "timeouts are checked in order", "config": { "timeoutMs": 0, "maxRetries": -1 }, "error": "Payment gateway timeoutMs must be a positive number." }
+  ]
+}

@@ -43,6 +43,7 @@ function serialize(doc) {
 
     expectedAmount: doc.expectedAmount,
     overpaidBy:     doc.overpaidBy,
+    underpaidBy:    doc.underpaidBy ?? 0,
 
     clientId:       doc.clientId,
     orderRef:       doc.orderRef,

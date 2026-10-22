@@ -33,12 +33,15 @@ const schema = new mongoose.Schema(
     amount: { type: Number, required: true },
     sender: { type: String, required: true },
 
-    // What the payment was received as, when it differs from what the caller
-    // expected. Underpayment is refused outright, so this is only ever ≥ 0:
-    // the surplus a student overpaid. Recorded rather than pocketed silently,
-    // so it can be refunded or credited later.
+    // What the caller expected, and how far the payment missed it. At most one
+    // of the two is non-zero. overpaidBy is the surplus a student overpaid,
+    // recorded rather than pocketed silently so it can be refunded or credited.
+    // underpaidBy is set only when the caller sent `acceptShortfall` — a
+    // person decided to take a short payment — and is what the customer still
+    // owes. Without that flag underpayment is refused and nothing is written.
     expectedAmount: { type: Number, required: true },
     overpaidBy:     { type: Number, default: 0 },
+    underpaidBy:    { type: Number, default: 0 },
 
     // --- Who spent it ---
 
