@@ -1,4 +1,4 @@
-# `@sakura/pay` — design
+# `@project-sakura/pay` — design
 
 Why the SDK exists, what it relies on in the gateway, and how it is meant to grow. Usage is in
 [README.md](README.md).
@@ -101,7 +101,7 @@ Two deliberate extras, both inherited from sakura-book:
 | F4 | Bad input is caught before it costs a request | `resources/claims/validate.ts` → `MISCONFIGURED` |
 | F5 | trxId is normalised like the server | `helpers/trxId.ts` |
 | F6 | Key and retry-schedule helpers | `helpers/keys.ts`, `helpers/retrySchedule.ts` |
-| F7 | Test double | `@sakura/pay/testing` |
+| F7 | Test double | `@project-sakura/pay/testing` |
 | N1 | Zero runtime dependencies | hand-written checks instead of zod, global `fetch` |
 | N2 | ESM + CJS + types | `tsup`. `typesVersions` covers `moduleResolution: node` (sakura-book) |
 | N3 | Short timeouts | 5s per attempt, 8s per call |
@@ -183,15 +183,15 @@ new gateway feature is a new `resources/` folder plus one line in `client.ts`.
 
 - Semver. **Adding an outcome variant is a major version** (it breaks exhaustive `switch`es). A new
   rejection kind, helper or resource is minor.
-- Release: `npm run release` in `packages/sdk` checks, builds and packs `sakura-pay-<v>.tgz`.
-  Commit the tarball to the consuming app's `vendor/` and depend on
-  `"@sakura/pay": "file:vendor/sakura-pay-<v>.tgz"`. This works in Docker and CI with no registry
-  or token.
-- Why not GitHub Packages: it requires the npm scope to match the GitHub owner (`@mrahmann0010`), so
-  it can't host `@sakura/pay`. Why not a git dependency: npm can't install a package from a
-  subdirectory of a repo.
-- If a registry becomes worth it later (more apps, CI publishing), the options are an npm org named
-  `sakura` (if free), or renaming the scope. Either way, app code only changes its import line.
+- Published to the public npm registry under the `project-sakura` org. Apps run
+  `npm install @project-sakura/pay`, with no token, in Docker and CI alike.
+- Public is safe because the package holds no credential: the client ID and secret live in each
+  app's environment. All it reveals is the `/v1` request and response shapes, which are useless
+  without a registered secret.
+- Release: bump `version`, add a CHANGELOG entry, then `npm run release` in `packages/sdk`.
+  `prepublishOnly` runs the full check first, so a failing build never publishes. A published
+  version can't be reused, so a bad release is fixed forward with a new patch version.
+- Why not GitHub Packages: it requires the npm scope to match the GitHub owner (`@mrahmann0010`).
 - Non-JS apps: publish an OpenAPI spec for `/v1` and generate a client from it.
 
 ---
@@ -205,6 +205,6 @@ new gateway feature is a new `resources/` folder plus one line in `client.ts`.
 | 2 — Credential check | `gateway.verifyCredentials()` at boot | `GET /v1/whoami` |
 | 3 — Inbound webhooks | `webhooks.verify(rawBody, signature)` → typed `claim.released` / `payment.received` events, so a release reaches the app without a human relaying it | `callbackUrl` + signing secret on `models/Client.js` (not there yet), delivery log, retry worker |
 | 4 — Hosted checkout | `sessions.create({ amountPoisha, orderRef, successUrl })` → redirect URL | `CheckoutSession` model, `/v1/checkout/sessions`, public pay page |
-| 5 — Framework adapters | `@sakura/pay/nest`: a module with DI and config | none |
+| 5 — Framework adapters | `@project-sakura/pay/nest`: a module with DI and config | none |
 
 Each phase is a new `resources/` folder and an export, which is a minor version.

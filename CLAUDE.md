@@ -13,7 +13,7 @@ over a credentialed JSON API.
 
 - `apps/server` — Express 5 + Mongoose 9 JSON API. Entry `src/server.js`; app wiring in `src/app.js`.
 - `apps/web` — SvelteKit 2 / **Svelte 5 (runes)** dashboard SPA, deployed on Vercel (`adapter-vercel`, Node 24).
-- `packages/sdk` — `@sakura/pay`, the TypeScript client consuming apps install to call `/v1`.
+- `packages/sdk` — `@project-sakura/pay`, the TypeScript client consuming apps install to call `/v1`.
   Zero runtime deps. See its README (usage) and DESIGN.md.
 
 Each app has its own `package.json`; run commands from inside the app directory.
@@ -43,8 +43,8 @@ SDK (`cd packages/sdk`):
 - `npm run test:contract` — the SDK against a real `apps/server` + Docker MongoDB, in a throwaway
   `sakura-pay-contract` database. **Run this after any change to `/v1` or the claim models**; it is
   the closest thing the server has to an integration test.
-- `npm run release` — check, then `npm pack` → `sakura-pay-<version>.tgz`, which consuming apps
-  vendor and install via `file:`.
+- `npm run release` — publish to public npm as `@project-sakura/pay` (`prepublishOnly` runs the
+  full check first). Bump `version` and add a CHANGELOG entry before it; a version can't be reused.
 
 ## Environments
 

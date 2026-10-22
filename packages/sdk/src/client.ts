@@ -56,7 +56,7 @@ function assertServerSide(): void {
   const g = globalThis as { window?: unknown; document?: unknown };
   if (typeof g.window !== "undefined" && typeof g.document !== "undefined") {
     throw new GatewayConfigError(
-      "@sakura/pay is server-side only: its secret must never reach a browser.",
+      "@project-sakura/pay is server-side only: its secret must never reach a browser.",
     );
   }
 }

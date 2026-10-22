@@ -1,4 +1,4 @@
-# @sakura/pay
+# @project-sakura/pay
 
 The server-side client for the Nihonova payment gateway. It claims a bKash / Nagad / Rocket payment
 for an order, **exactly once across every business that shares the receiving number**.
@@ -8,31 +8,18 @@ for an order, **exactly once across every business that shares the receiving num
 - Retries network failures safely, under a time budget a checkout can afford.
 - Built from sakura-book's production integration.
 
-Design and rationale: [DESIGN.md](DESIGN.md). Gateway contract: [docs/client-integration.md](../../docs/client-integration.md).
+Design and rationale: [DESIGN.md](DESIGN.md). The full gateway contract is
+`docs/client-integration.md` in the gateway repo.
 
 ---
 
 ## Install
 
-From `packages/sdk` in the gateway repo:
-
 ```sh
-npm install
-npm run release          # typecheck + test + build + pack → sakura-pay-0.1.0.tgz
+npm install @project-sakura/pay
 ```
 
-Copy the tarball into the consuming app and depend on it:
-
-```sh
-mkdir -p vendor && cp sakura-pay-0.1.0.tgz <app>/vendor/
-```
-
-```json
-{ "dependencies": { "@sakura/pay": "file:vendor/sakura-pay-0.1.0.tgz" } }
-```
-
-Commit `vendor/`. It installs the same way locally, in Docker and in CI, with no registry or
-token. To upgrade, drop in the new tarball and update the path.
+Install it in your app's **server** code only. It refuses to load in a browser.
 
 ---
 
@@ -50,7 +37,7 @@ SAKURA_PAYMENT_GATEWAY_SECRET=<secret>
 Create one client at boot and share it:
 
 ```ts
-import { createGatewayClient } from "@sakura/pay";
+import { createGatewayClient } from "@project-sakura/pay";
 
 export const gateway = createGatewayClient({
   baseUrl: process.env.SAKURA_PAYMENT_GATEWAY_URL,
@@ -71,7 +58,7 @@ export const gateway = createGatewayClient({
 ## Claiming
 
 ```ts
-import { claimKeyFor } from "@sakura/pay";
+import { claimKeyFor } from "@project-sakura/pay";
 
 const key = claimKeyFor(order.number, order.paymentClaimKey); // "SB-10482:1"
 await saveClaimKey(order.id, key); // persist BEFORE the first call
@@ -130,7 +117,7 @@ The customer usually taps "I've paid" before the SMS reaches the gateway. Don't 
 Answer "confirming…" and retry in the background with the **same key**:
 
 ```ts
-import { isRetryable, nextRetryDelaySeconds } from "@sakura/pay";
+import { isRetryable, nextRetryDelaySeconds } from "@project-sakura/pay";
 
 if (isRetryable(outcome)) {
   const delay = nextRetryDelaySeconds(
@@ -166,7 +153,7 @@ with the same key, so a dropped connection rarely reaches your code.
 ## Testing your app
 
 ```ts
-import { claimedOutcome, createFakeGatewayClient } from "@sakura/pay/testing";
+import { claimedOutcome, createFakeGatewayClient } from "@project-sakura/pay/testing";
 
 const gateway = createFakeGatewayClient([
   { outcome: "PENDING_ARRIVAL" },

@@ -1,4 +1,4 @@
-// @sakura/pay — the public surface. Anything not exported here is internal and
+// @project-sakura/pay — the public surface. Anything not exported here is internal and
 // may change in any release; anything exported here follows semver.
 
 export { createGatewayClient } from "./client";

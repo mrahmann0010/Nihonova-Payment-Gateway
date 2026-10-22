@@ -4,7 +4,7 @@ import type { ClaimOutcome, ClaimRequest } from "../resources/claims/types";
 /* --------------------------------------------------------------------------
    A stand-in GatewayClient for an app's own tests: same shape, no network.
 
-     import { createFakeGatewayClient } from "@sakura/pay/testing";
+     import { createFakeGatewayClient } from "@project-sakura/pay/testing";
 
      const gateway = createFakeGatewayClient([
        { outcome: "PENDING_ARRIVAL" },
