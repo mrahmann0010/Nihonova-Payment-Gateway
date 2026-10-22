@@ -186,8 +186,13 @@ unconfigured path.
 ```sh
 cd packages/sdk
 npm install
-npm run check   # tsc + vitest + tsup
+npm run check          # tsc + unit tests + build
+npm run test:contract  # against the real gateway: needs `docker compose up -d` at the repo root
 ```
+
+The contract suite starts `apps/server` (run `npm install` there first) on a free port, against a
+throwaway `sakura-pay-contract` database that it creates and drops each run. Your local
+`primary-data` copy is never touched.
 
 When the gateway's `/v1` responses change, update `src/contract/wire.ts` and
 `src/resources/claims/interpret.ts` **in the same commit**. Add a line to

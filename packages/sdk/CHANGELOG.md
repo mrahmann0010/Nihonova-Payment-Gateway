@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Contract test suite (`npm run test:contract`): 26 end-to-end checks against a real gateway.
+  No API change.
+
 ## 0.1.0
 
 First release, ported from sakura-book's `apps/api/src/payment-gateway` module.

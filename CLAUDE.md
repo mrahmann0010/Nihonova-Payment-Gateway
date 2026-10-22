@@ -40,6 +40,9 @@ Web (`cd apps/web`):
 
 SDK (`cd packages/sdk`):
 - `npm run check` — tsc + vitest + tsup. The only package here with a real test suite.
+- `npm run test:contract` — the SDK against a real `apps/server` + Docker MongoDB, in a throwaway
+  `sakura-pay-contract` database. **Run this after any change to `/v1` or the claim models**; it is
+  the closest thing the server has to an integration test.
 - `npm run release` — check, then `npm pack` → `sakura-pay-<version>.tgz`, which consuming apps
   vendor and install via `file:`.
 

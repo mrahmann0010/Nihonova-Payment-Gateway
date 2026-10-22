@@ -39,6 +39,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:contract": "vitest run --config vitest.contract.config.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "release": "npm run check && npm pack",
     "prepare": "tsup"

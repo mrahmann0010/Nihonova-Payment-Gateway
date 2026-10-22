@@ -170,9 +170,12 @@ new gateway feature is a new `resources/` folder plus one line in `client.ts`.
    translator and fails if any falls into the "outside the contract" branch.
 3. **The normaliser mirrors** `apps/server/src/services/trxId.js`, and `helpers.spec.ts` pins the
    same cases.
-4. **Not done yet: live contract tests.** A suite that runs the SDK against a local server and
-   Docker MongoDB, covering every row of §2. It needs a seeded test client and payment, and is the
-   next piece of test work.
+4. **Live contract tests** (`npm run test:contract`, `test/contract/`). These start `apps/server`
+   as a child process against a throwaway `sakura-pay-contract` database on the Docker MongoDB.
+   They seed clients and payments through the server's own models, so the production indexes are
+   in place, and check every row of §2 end to end, including a two-business race, a late SMS
+   followed by a same-key claim, and a release through the real admin route. The harness only
+   ever drops that one database, and only on loopback.
 
 ---
 
@@ -198,7 +201,7 @@ new gateway feature is a new `resources/` folder plus one line in `client.ts`.
 | Phase | Scope | Gateway changes needed |
 |---|---|---|
 | **1 — Claims** (this release) | `claims.claim`, helpers, test double | none |
-| 1b | Live contract tests (§7.4); sakura-book switches to the SDK | none |
+| 1b | ~~Live contract tests (§7.4)~~ done; sakura-book switches to the SDK | none |
 | 2 — Credential check | `gateway.verifyCredentials()` at boot | `GET /v1/whoami` |
 | 3 — Inbound webhooks | `webhooks.verify(rawBody, signature)` → typed `claim.released` / `payment.received` events, so a release reaches the app without a human relaying it | `callbackUrl` + signing secret on `models/Client.js` (not there yet), delivery log, retry worker |
 | 4 — Hosted checkout | `sessions.create({ amountPoisha, orderRef, successUrl })` → redirect URL | `CheckoutSession` model, `/v1/checkout/sessions`, public pay page |
