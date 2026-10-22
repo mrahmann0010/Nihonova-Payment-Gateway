@@ -7,6 +7,8 @@ for an order, **exactly once across every business that shares the receiving num
 - `claim()` never throws. Every answer, including "the gateway is down", is a typed outcome.
 - Retries network failures safely, under a time budget a checkout can afford.
 - Built from sakura-book's production integration.
+- Has a Python twin, [`sakura-pay`](../sdk-python) on PyPI, with identical behaviour: both are
+  generated from and tested against [`packages/sdk-spec`](../sdk-spec).
 
 Design and rationale: [DESIGN.md](DESIGN.md). The full gateway contract is
 `docs/client-integration.md` in the gateway repo.
@@ -97,6 +99,23 @@ switch (outcome.outcome) {
 }
 ```
 
+### Accepting a short payment
+
+`UNDERPAID` leaves the payment unclaimed, because an automatic checkout must never grant on less
+money. When a person on your side looks at it and decides to take it anyway, claim again with the
+**same key** and `acceptShortfall: true`:
+
+```ts
+const outcome = await gateway.claims.claim({ ...sameRequestAsBefore, acceptShortfall: true });
+
+if (outcome.outcome === "CLAIMED" && outcome.underpaidPoisha > 0) {
+  recordAmountDue(order, outcome.underpaidPoisha); // what the customer still owes
+}
+```
+
+Keep `expectedPoisha` at the real order total, so the gateway records the shortfall too (it shows
+on the gateway's Claims page). Only `true` counts. Never set it on an automatic path.
+
 Rules that matter:
 
 1. **Only `CLAIMED` grants.** Every other outcome means "don't ship".
@@ -170,17 +189,22 @@ unconfigured path.
 
 ## Developing the SDK
 
+Behaviour is defined in [`packages/sdk-spec`](../sdk-spec), not here: constants and messages are
+generated from its `spec.json` (`src/contract/spec.generated.ts`, never edited by hand), and the
+unit tests run its shared vectors, the same ones the Python SDK runs. A behaviour change starts
+there; see its README.
+
 ```sh
 cd packages/sdk
 npm install
-npm run check          # tsc + unit tests + build
+npm run check          # tsc + unit tests (shared vectors + JS-only) + build
 npm run test:contract  # against the real gateway: needs `docker compose up -d` at the repo root
 ```
 
-The contract suite starts `apps/server` (run `npm install` there first) on a free port, against a
-throwaway `sakura-pay-contract` database that it creates and drops each run. Your local
-`primary-data` copy is never touched.
+The contract suite runs `packages/sdk-spec/contract/scenarios.json` through the shared harness,
+which starts `apps/server` (run `npm install` there first) on a free port, against a throwaway
+`sakura-pay-contract` database that it creates and drops each run. Your local `primary-data` copy
+is never touched.
 
-When the gateway's `/v1` responses change, update `src/contract/wire.ts` and
-`src/resources/claims/interpret.ts` **in the same commit**. Add a line to
-[CHANGELOG.md](CHANGELOG.md) and bump the version (a new outcome variant is a major version).
+Release both SDKs together with `npm run release` in `packages/sdk-spec` (`npm run release` here
+forwards to it). A new outcome variant is a major version.

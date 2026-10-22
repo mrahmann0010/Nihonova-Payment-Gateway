@@ -1,6 +1,6 @@
 {
   "name": "@project-sakura/pay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Server-side client for the Nihonova payment gateway: claim bKash / Nagad / Rocket payments exactly once.",
   "license": "UNLICENSED",
   "publishConfig": {
@@ -44,7 +44,7 @@
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "prepublishOnly": "npm run check",
-    "release": "npm publish",
+    "release": "cd ../sdk-spec && npm run release",
     "prepare": "tsup"
   },
   "devDependencies": {

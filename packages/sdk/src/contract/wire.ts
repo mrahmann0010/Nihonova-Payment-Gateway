@@ -6,18 +6,21 @@
    response shape lands here in the same commit as the server change.
    -------------------------------------------------------------------------- */
 
-export const PLATFORMS = ["bkash", "nagad", "rocket"] as const;
+import {
+  MAX_IDEMPOTENCY_KEY_LENGTH,
+  MAX_ORDER_REF_LENGTH,
+  PLATFORMS,
+  REASONS,
+} from "./spec.generated";
+
+// The lists and limits come from spec.json, shared with every other SDK.
+export { MAX_IDEMPOTENCY_KEY_LENGTH, MAX_ORDER_REF_LENGTH, PLATFORMS, REASONS };
+
 export type Platform = (typeof PLATFORMS)[number];
 
 export function isPlatform(value: unknown): value is Platform {
   return typeof value === "string" && (PLATFORMS as readonly string[]).includes(value);
 }
-
-/** The gateway's limit on idempotency keys (MAX_IDEM_KEY in v1.js). */
-export const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
-
-/** The gateway truncates orderRef past this (MAX_ORDER_REF in v1.js). */
-export const MAX_ORDER_REF_LENGTH = 200;
 
 /** POST /v1/claims body. */
 export type ClaimRequestBody = {
@@ -27,6 +30,8 @@ export type ClaimRequestBody = {
   orderRef?: string;
   platform?: Platform;
   senderPhone?: string;
+  /** Claim a short payment instead of refusing it with amount_mismatch. */
+  acceptShortfall?: true;
 };
 
 /** 201 (new claim) or 200 (replay of our own claim). */
@@ -37,6 +42,12 @@ export type ClaimedBody = {
   amount: number;
   expectedAmount: number;
   overpaidBy: number;
+  /**
+   * Above 0 only when the claim accepted a shortfall. Older gateways leave it
+   * out. Not read by the SDK, which works the shortfall out from its own
+   * numbers, as it does for the underpayment second look.
+   */
+  underpaidBy?: number;
   orderRef: string;
   idempotencyKey: string;
   claimedAt: string;
@@ -64,23 +75,9 @@ export type RefusedBody = {
 };
 
 /**
- * The published reason codes. Frozen: consuming apps switch on them, so the
- * server never renames one (CLAUDE.md, "Claims"). A code the SDK does not
- * know yet is handled as "never grant" — see interpretClaimResponse.
+ * The published reason codes (REASONS, from spec.json). Frozen: consuming apps
+ * switch on them, so the server never renames one (CLAUDE.md, "Claims"). A
+ * code the SDK does not know yet is handled as "never grant" — see
+ * interpretClaimResponse.
  */
-export const REASONS = [
-  "not_found",
-  "already_claimed",
-  "claim_released",
-  "idempotency_key_reused",
-  "ambiguous_trx",
-  "outside_claim_window",
-  "amount_mismatch",
-  "exceeds_max_claim",
-  "sender_mismatch",
-  "rate_limited",
-  "invalid_request",
-  "unauthenticated",
-  "client_inactive",
-] as const;
 export type Reason = (typeof REASONS)[number];

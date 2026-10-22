@@ -1,4 +1,6 @@
 import type { GatewayClient } from "../client";
+import { CLAIMED_OUTCOME_DEFAULTS } from "../contract/spec.generated";
+import { message } from "../helpers/format";
 import type { ClaimOutcome, ClaimRequest } from "../resources/claims/types";
 
 /* --------------------------------------------------------------------------
@@ -44,7 +46,7 @@ export function createFakeGatewayClient(
       async claim(request) {
         calls.push(request);
         if (!enabled) {
-          return { outcome: "UNAVAILABLE", reason: "The payment gateway is not configured." };
+          return { outcome: "UNAVAILABLE", reason: message("notConfigured") };
         }
         if (typeof respond === "function") return respond(request, calls.length);
         const next = queue!.length > 1 ? queue!.shift()! : queue![0];
@@ -59,13 +61,8 @@ export function claimedOutcome(
   overrides: Partial<Extract<ClaimOutcome, { outcome: "CLAIMED" }>> = {},
 ): Extract<ClaimOutcome, { outcome: "CLAIMED" }> {
   return {
-    outcome: "CLAIMED",
-    trxId: "8F3K2M9X01",
-    platform: "bkash",
-    paidPoisha: 125_000,
-    overpaidPoisha: 0,
-    claimedAt: new Date("2026-01-01T00:00:00.000Z"),
-    replay: false,
+    ...CLAIMED_OUTCOME_DEFAULTS,
+    claimedAt: new Date(CLAIMED_OUTCOME_DEFAULTS.claimedAt),
     ...overrides,
   };
 }

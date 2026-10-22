@@ -1,4 +1,6 @@
 import { MAX_IDEMPOTENCY_KEY_LENGTH } from "../contract/wire";
+import { message } from "./format";
+import { trim } from "./text";
 
 /* --------------------------------------------------------------------------
    The idempotency key an order's payment is claimed with.
@@ -16,6 +18,8 @@ import { MAX_IDEMPOTENCY_KEY_LENGTH } from "../contract/wire";
    back.
    -------------------------------------------------------------------------- */
 
+// `.` stops at line breaks and \d is ASCII-only here; the other SDKs spell
+// both out, so the pattern means the same thing in every language.
 const KEY_PATTERN = /^(.+):(\d+)$/;
 
 export function firstClaimKey(orderRef: string): string {
@@ -38,11 +42,9 @@ export function nextClaimKey(orderRef: string, current: string | null | undefine
 }
 
 function checked(orderRef: string, key: string): string {
-  if (!orderRef.trim()) throw new Error("A claim key needs an order reference.");
+  if (!trim(orderRef)) throw new Error(message("keyNeedsOrderRef"));
   if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
-    throw new Error(
-      `Claim key for ${orderRef} would exceed ${MAX_IDEMPOTENCY_KEY_LENGTH} characters.`,
-    );
+    throw new Error(message("keyWouldBeTooLong", { orderRef, max: MAX_IDEMPOTENCY_KEY_LENGTH }));
   }
   return key;
 }

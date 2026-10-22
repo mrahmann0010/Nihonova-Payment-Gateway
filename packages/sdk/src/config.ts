@@ -1,4 +1,7 @@
+import { DEFAULTS, LOCAL_HOSTS } from "./contract/spec.generated";
 import { GatewayConfigError } from "./errors";
+import { message } from "./helpers/format";
+import { trim } from "./helpers/text";
 import type { GatewayLogger } from "./logger";
 import { silentLogger } from "./logger";
 import type { FetchLike } from "./transport/http";
@@ -43,9 +46,9 @@ export type ResolvedConfig =
       fetch: FetchLike;
     };
 
-export const DEFAULTS = { timeoutMs: 5_000, totalBudgetMs: 8_000, maxRetries: 1 } as const;
+export { DEFAULTS };
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+const LOCAL = new Set<string>(LOCAL_HOSTS);
 
 /**
  * Check the config once, at construction. Every problem found here is a
@@ -74,9 +77,7 @@ export function resolveConfig(config: GatewayClientConfig): ResolvedConfig {
     )
       .filter(([, value]) => !value)
       .map(([name]) => name);
-    throw new GatewayConfigError(
-      `Payment gateway config is incomplete: missing ${missing.join(", ")}. Set all three or none.`,
-    );
+    throw new GatewayConfigError(message("configIncomplete", { missing: missing.join(", ") }));
   }
 
   const url = parseBaseUrl(baseUrl!);
@@ -84,7 +85,7 @@ export function resolveConfig(config: GatewayClientConfig): ResolvedConfig {
   // The credential is `<clientId>.<secret>` and the server splits on the FIRST
   // dot, so a dot inside the client ID would send the wrong credential.
   if (clientId!.includes(".")) {
-    throw new GatewayConfigError("Payment gateway clientId must not contain a dot.");
+    throw new GatewayConfigError(message("clientIdHasDot"));
   }
 
   const fetchImpl = config.fetch ?? (globalThis.fetch as FetchLike | undefined);
@@ -112,32 +113,28 @@ function parseBaseUrl(raw: string): string {
   try {
     url = new URL(raw);
   } catch {
-    throw new GatewayConfigError(`Payment gateway baseUrl is not a URL: ${raw}`);
+    throw new GatewayConfigError(message("baseUrlNotUrl", { raw }));
   }
 
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname))) {
-    throw new GatewayConfigError(
-      "Payment gateway baseUrl must use https (plain http is allowed only for localhost).",
-    );
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOCAL.has(url.hostname))) {
+    throw new GatewayConfigError(message("baseUrlNotHttps"));
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new GatewayConfigError(
-      "Payment gateway baseUrl must be a plain origin/path, without credentials, query or fragment.",
-    );
+    throw new GatewayConfigError(message("baseUrlNotPlain"));
   }
 
   return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
 }
 
 function blankToUndefined(value: string | undefined): string | undefined {
-  const trimmed = typeof value === "string" ? value.trim() : undefined;
+  const trimmed = typeof value === "string" ? trim(value) : undefined;
   return trimmed ? trimmed : undefined;
 }
 
 function positive(name: string, value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   if (!Number.isFinite(value) || value <= 0) {
-    throw new GatewayConfigError(`Payment gateway ${name} must be a positive number.`);
+    throw new GatewayConfigError(message("notPositive", { name }));
   }
   return value;
 }
@@ -145,7 +142,7 @@ function positive(name: string, value: number | undefined, fallback: number): nu
 function nonNegativeInt(name: string, value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   if (!Number.isInteger(value) || value < 0) {
-    throw new GatewayConfigError(`Payment gateway ${name} must be a whole number ≥ 0.`);
+    throw new GatewayConfigError(message("notNonNegativeInt", { name }));
   }
   return value;
 }

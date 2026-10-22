@@ -162,20 +162,30 @@ new gateway feature is a new `resources/` folder plus one line in `client.ts`.
 
 ---
 
-## 7. Keeping the SDK and the gateway in sync
+## 7. Keeping the SDKs and the gateway in sync
 
-1. **Same-commit rule.** A change to a `/v1` response shape or reason code updates
-   `contract/wire.ts` and `resources/claims/interpret.ts` in the same commit (see CLAUDE.md).
-2. **Exhaustiveness test.** `interpret.spec.ts` sends every code in `REASONS` through the
-   translator and fails if any falls into the "outside the contract" branch.
-3. **The normaliser mirrors** `apps/server/src/services/trxId.js`, and `helpers.spec.ts` pins the
-   same cases.
-4. **Live contract tests** (`npm run test:contract`, `test/contract/`). These start `apps/server`
-   as a child process against a throwaway `sakura-pay-contract` database on the Docker MongoDB.
-   They seed clients and payments through the server's own models, so the production indexes are
-   in place, and check every row of §2 end to end, including a two-business race, a late SMS
-   followed by a same-key claim, and a release through the real admin route. The harness only
-   ever drops that one database, and only on loopback.
+There are two SDKs, this one and its Python twin `sakura-pay` (`packages/sdk-python`), and they
+must behave identically. Neither owns the rules: [`packages/sdk-spec`](../sdk-spec) does.
+
+1. **One spec.** Constants, limits, defaults, the retry schedule, every message string and the
+   version live in `sdk-spec/spec.json` and are generated into both SDKs. `generate --check` fails
+   if a generated file is stale.
+2. **Shared vectors.** About 300 cases in `sdk-spec/vectors/` pin every behaviour exactly:
+   validation, the request body, every reason code, config checks, whole claim flows over a
+   scripted transport (including retries, the time budget and the wallet resend), the helpers and
+   the test double. Both SDKs run all of them. One vector checks that every code in `REASONS` has
+   a case.
+3. **The normaliser mirrors** `apps/server/src/services/trxId.js`; `sdk-spec/scripts/check-server.mjs`
+   runs the server's own function against the same trxId vectors.
+4. **Shared live contract tests** (`sdk-spec/contract/`). `harness.mjs` starts `apps/server` as a
+   child process against a throwaway `sakura-pay-contract` database on the Docker MongoDB, seeding
+   through the server's own models so the production indexes are in place. Both SDKs run every
+   case of `scenarios.json` against it (the Python SDK twice: sync and async), covering every row
+   of §2 end to end, including a two-business race, a late SMS followed by a same-key claim, and a
+   release through the real admin route. The harness only ever drops that one database, and only
+   on loopback.
+5. **Same-commit rule.** A `/v1` change updates the server, the vectors or scenarios, and both SDKs
+   in one commit (see CLAUDE.md).
 
 ---
 
@@ -188,11 +198,13 @@ new gateway feature is a new `resources/` folder plus one line in `client.ts`.
 - Public is safe because the package holds no credential: the client ID and secret live in each
   app's environment. All it reveals is the `/v1` request and response shapes, which are useless
   without a registered secret.
-- Release: bump `version`, add a CHANGELOG entry, then `npm run release` in `packages/sdk`.
-  `prepublishOnly` runs the full check first, so a failing build never publishes. A published
-  version can't be reused, so a bad release is fixed forward with a new patch version.
+- Release: bump `version` in `packages/sdk-spec/spec.json`, run `npm run generate` there, add a
+  CHANGELOG entry, then `npm run release` in `packages/sdk-spec`. It runs the shared check and both
+  contract suites, then publishes this package to npm and `sakura-pay` to PyPI at the same version.
+  A published version can't be reused, so a bad release is fixed forward with a new patch version.
 - Why not GitHub Packages: it requires the npm scope to match the GitHub owner (`@mrahmann0010`).
-- Non-JS apps: publish an OpenAPI spec for `/v1` and generate a client from it.
+- Python apps: `pip install sakura-pay` (`packages/sdk-python`), identical behaviour. Another
+  language would be a third SDK held to the same `sdk-spec` vectors.
 
 ---
 

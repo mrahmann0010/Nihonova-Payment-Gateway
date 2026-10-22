@@ -1,6 +1,7 @@
 // @project-sakura/pay — the public surface. Anything not exported here is internal and
 // may change in any release; anything exported here follows semver.
 
+export { VERSION } from "./contract/spec.generated";
 export { createGatewayClient } from "./client";
 export type { GatewayClient } from "./client";
 export type { GatewayClientConfig } from "./config";

@@ -7,6 +7,8 @@
    second one. The budget exists because a checkout is waiting.
    -------------------------------------------------------------------------- */
 
+import { BACKOFF } from "../contract/spec.generated";
+
 export type RetryPolicy = {
   /** Extra attempts after the first. 0 turns in-call retries off. */
   maxRetries: number;
@@ -30,13 +32,10 @@ export const defaultRetryDeps: RetryDeps = {
   random: Math.random,
 };
 
-/** Shortest attempt worth starting; below this it would time out on arrival. */
-const MIN_ATTEMPT_MS = 250;
-
 /** 250ms, 750ms, 2250ms… with ±25% jitter, so callers don't retry in step. */
 export function backoffMs(retry: number, random: () => number): number {
-  const base = 250 * 3 ** retry;
-  return Math.round(base * (0.75 + random() * 0.5));
+  const base = BACKOFF.baseMs * BACKOFF.factor ** retry;
+  return Math.round(base * (1 - BACKOFF.jitter + random() * 2 * BACKOFF.jitter));
 }
 
 export async function withRetry<T>(
@@ -50,7 +49,8 @@ export async function withRetry<T>(
   for (let retry = 0; retry < policy.maxRetries && result.transient; retry++) {
     const wait = backoffMs(retry, deps.random);
     const left = deadline - deps.now() - wait;
-    if (left < MIN_ATTEMPT_MS) break;
+    // Shortest attempt worth starting; below it, it would time out on arrival.
+    if (left < BACKOFF.minAttemptMs) break;
 
     await deps.sleep(wait);
     result = await run(Math.min(policy.timeoutMs, left));

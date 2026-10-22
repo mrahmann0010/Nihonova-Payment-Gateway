@@ -1,0 +1,17 @@
+{
+  "name": "@project-sakura/pay-spec",
+  "private": true,
+  "description": "The shared spec, test vectors and contract scenarios behind every Sakura Pay SDK.",
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "check:spec": "node scripts/generate.mjs --check && node scripts/check-server.mjs",
+    "check:ts": "cd ../sdk && npm run check",
+    "check:py": "cd ../sdk-python && uv run --frozen ruff check src tests && uv run --frozen ruff format --check src tests && uv run --frozen mypy && uv run --frozen pytest -q && uv build -q",
+    "check": "npm run check:spec && npm run check:ts && npm run check:py",
+    "test:contract:ts": "cd ../sdk && npm run test:contract",
+    "test:contract:py": "cd ../sdk-python && uv run --frozen pytest tests/contract -q",
+    "test:contract": "npm run test:contract:ts && npm run test:contract:py",
+    "release": "node scripts/release.mjs"
+  }
+}

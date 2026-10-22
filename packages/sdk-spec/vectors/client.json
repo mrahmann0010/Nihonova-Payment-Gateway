@@ -1,0 +1,403 @@
+{
+  "description": "claims.claim() end to end over a scripted HTTP transport and a fake clock. Each exchange answers one request, in order; the last one repeats. `takesMs` advances the clock while a request is in flight. `random` is the jitter source (0.5 = no jitter). `sleeps` are the in-call backoff waits, in ms. `calls` lists every request sent: its URL, headers and parsed JSON body.",
+
+  "baseConfig": {
+    "baseUrl": "https://gateway.example/",
+    "clientId": "sakura-book",
+    "secret": "s3cret.with.dots"
+  },
+
+  "baseRequest": {
+    "trxId": "8F3K2M9X01",
+    "expectedPoisha": 125000,
+    "idempotencyKey": "SB-10482:1",
+    "orderRef": "SB-10482"
+  },
+
+  "claimedBody": {
+    "claimed": true,
+    "trxId": "8F3K2M9X01",
+    "platform": "bkash",
+    "amount": 1300,
+    "expectedAmount": 1250,
+    "overpaidBy": 50,
+    "orderRef": "SB-10482",
+    "idempotencyKey": "SB-10482:1",
+    "claimedAt": "2026-10-21T08:14:02.000Z",
+    "state": "claimed"
+  },
+
+  "sentBody": {
+    "trxId": "8F3K2M9X01",
+    "expectedAmount": 1250,
+    "idempotencyKey": "SB-10482:1",
+    "orderRef": "SB-10482"
+  },
+
+  "scenarios": [
+    {
+      "name": "posts to /v1/claims with the bearer credential and JSON headers",
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "calls": [
+        {
+          "method": "POST",
+          "url": "https://gateway.example/v1/claims",
+          "headers": { "authorization": "Bearer sakura-book.s3cret.with.dots", "content-type": "application/json", "accept": "application/json" },
+          "body": "$sentBody"
+        }
+      ],
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "keeps a path prefix on the base URL",
+      "config": { "baseUrl": "https://example.com/gateway/" },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "calls": [{ "url": "https://example.com/gateway/v1/claims", "body": "$sentBody" }],
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "sends the normalised trxId, the phone and the order ref",
+      "request": { "trxId": " 8f3k-2m9x 01 ", "senderPhone": "01712345678" },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "calls": [
+        { "body": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482", "senderPhone": "01712345678" } }
+      ],
+      "sleeps": [],
+      "logs": []
+    },
+
+    {
+      "name": "asks without the wallet first, so a wrong pick cannot hide the payment",
+      "request": { "platform": "nagad" },
+      "exchanges": [{ "status": 404, "body": { "claimed": false, "reason": "not_found" } }],
+      "outcome": { "outcome": "PENDING_ARRIVAL" },
+      "calls": [{ "body": "$sentBody" }],
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "resends once with the wallet when the ID is ambiguous, with the same key",
+      "request": { "platform": "nagad" },
+      "exchanges": [
+        { "status": 409, "body": { "claimed": false, "reason": "ambiguous_trx", "platforms": ["bkash", "nagad"] } },
+        { "status": 201, "body": { "$merge": ["$claimedBody", { "platform": "nagad" }] } }
+      ],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "nagad", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "calls": [
+        { "body": "$sentBody" },
+        { "body": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482", "platform": "nagad" } }
+      ],
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "stays REJECTED on an ambiguous ID when no wallet was given",
+      "exchanges": [{ "status": 409, "body": { "claimed": false, "reason": "ambiguous_trx" } }],
+      "outcome": { "outcome": "REJECTED", "rejection": "AMBIGUOUS", "reason": "This transaction ID exists on more than one wallet; the wallet must be named." },
+      "calls": [{ "body": "$sentBody" }],
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "stays REJECTED if the wallet does not settle it either",
+      "request": { "platform": "bkash" },
+      "exchanges": [{ "status": 409, "body": { "claimed": false, "reason": "ambiguous_trx" } }],
+      "outcome": { "outcome": "REJECTED", "rejection": "AMBIGUOUS", "reason": "This transaction ID exists on more than one wallet; the wallet must be named." },
+      "calls": [
+        { "body": "$sentBody" },
+        { "body": { "trxId": "8F3K2M9X01", "expectedAmount": 1250, "idempotencyKey": "SB-10482:1", "orderRef": "SB-10482", "platform": "bkash" } }
+      ],
+      "sleeps": [],
+      "logs": []
+    },
+
+    {
+      "name": "a network failure is UNAVAILABLE",
+      "config": { "maxRetries": 0 },
+      "exchanges": [{ "networkError": "fetch failed" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway could not be reached: fetch failed" },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "a timeout is UNAVAILABLE and says how long it waited",
+      "config": { "maxRetries": 0, "timeoutMs": 5000 },
+      "exchanges": [{ "timeout": true }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway did not answer within 5000 ms." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "an HTML error page is UNAVAILABLE",
+      "config": { "maxRetries": 0 },
+      "exchanges": [{ "status": 502, "bodyText": "<html>oops</html>" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway answered 502." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "a non-JSON 404 is outside the contract",
+      "exchanges": [{ "status": 404, "bodyText": "Cannot POST /nope/v1/claims" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (404)." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": ["Payment gateway sent an answer outside its contract: 404 (no reason)"]
+    },
+
+    {
+      "name": "a body that is not strict JSON is no body: NaN never grants",
+      "exchanges": [{ "status": 201, "bodyText": "{\"claimed\":true,\"trxId\":\"8F3K2M9X01\",\"platform\":\"bkash\",\"amount\":NaN,\"claimedAt\":\"2026-10-21T08:14:02.000Z\"}" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (201)." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": ["Payment gateway sent an answer outside its contract: 201 (no reason)"]
+    },
+    {
+      "name": "a JSON body behind a byte-order mark still reads",
+      "exchanges": [{ "status": 201, "bodyText": "\ufeff{\"claimed\":true,\"trxId\":\"8F3K2M9X01\",\"platform\":\"bkash\",\"amount\":1250,\"claimedAt\":\"2026-10-21T08:14:02.000Z\"}" }],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 125000, "overpaidPoisha": 0, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "a redirect is not followed: the base URL is wrong",
+      "exchanges": [{ "status": 301, "bodyText": "", "headers": { "location": "https://elsewhere.example/v1/claims" } }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway sent an unexpected answer (301)." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": ["Payment gateway sent an answer outside its contract: 301 (no reason)"]
+    },
+
+    {
+      "name": "refuses a blank trxId before sending",
+      "request": { "trxId": " - " },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The transaction ID is empty." },
+      "callCount": 0,
+      "sleeps": [],
+      "logs": ["Refusing to send a bad claim for SB-10482: The transaction ID is empty."]
+    },
+    {
+      "name": "refuses a fractional amount before sending",
+      "request": { "expectedPoisha": 12.5 },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The expected amount (12.5 poisha) is not a positive whole number." },
+      "callCount": 0,
+      "sleeps": [],
+      "logs": ["Refusing to send a bad claim for SB-10482: The expected amount (12.5 poisha) is not a positive whole number."]
+    },
+    {
+      "name": "refuses a string amount before sending",
+      "request": { "expectedPoisha": "1250" },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The expected amount (1250 poisha) is not a positive whole number." },
+      "callCount": 0,
+      "sleeps": [],
+      "logs": ["Refusing to send a bad claim for SB-10482: The expected amount (1250 poisha) is not a positive whole number."]
+    },
+    {
+      "name": "refuses a blank key, naming ? when there is no order ref",
+      "request": { "idempotencyKey": " ", "orderRef": { "$delete": true } },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The claim key is empty." },
+      "callCount": 0,
+      "sleeps": [],
+      "logs": ["Refusing to send a bad claim for ?: The claim key is empty."]
+    },
+    {
+      "name": "refuses an unknown wallet before sending",
+      "request": { "platform": "upay" },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The platform \"upay\" is not bkash, nagad or rocket." },
+      "callCount": 0,
+      "sleeps": [],
+      "logs": ["Refusing to send a bad claim for SB-10482: The platform \"upay\" is not bkash, nagad or rocket."]
+    },
+
+    {
+      "name": "retries a 5xx with the same body, then gets our replay",
+      "exchanges": [{ "status": 503, "body": {} }, { "status": 200, "body": "$claimedBody" }],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": true },
+      "calls": [{ "body": "$sentBody" }, { "body": "$sentBody" }],
+      "sleeps": [250],
+      "logs": []
+    },
+    {
+      "name": "retries an unreadable success, then gets our replay",
+      "exchanges": [
+        { "status": 201, "body": { "$merge": ["$claimedBody", { "claimedAt": "garbage" }] } },
+        { "status": 200, "body": "$claimedBody" }
+      ],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "bkash", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": true },
+      "callCount": 2,
+      "sleeps": [250],
+      "logs": ["Payment gateway sent an unreadable success body: claimedAt is not a date"]
+    },
+    {
+      "name": "gives up after one retry by default",
+      "exchanges": [{ "status": 500, "bodyText": "" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway answered 500." },
+      "callCount": 2,
+      "sleeps": [250],
+      "logs": []
+    },
+    {
+      "name": "retries a network error up to maxRetries",
+      "config": { "maxRetries": 2 },
+      "exchanges": [{ "networkError": "fetch failed" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway could not be reached: fetch failed" },
+      "callCount": 3,
+      "sleeps": [250, 750],
+      "logs": []
+    },
+    {
+      "name": "jitter changes the waits",
+      "config": { "maxRetries": 2 },
+      "random": 0,
+      "exchanges": [{ "networkError": "fetch failed" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway could not be reached: fetch failed" },
+      "callCount": 3,
+      "sleeps": [188, 563],
+      "logs": []
+    },
+    {
+      "name": "does not retry a rate limit inside the call",
+      "config": { "maxRetries": 3 },
+      "exchanges": [{ "status": 429, "body": { "claimed": false, "reason": "rate_limited", "retryAfter": 7 }, "headers": { "retry-after": "7" } }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop.", "retryAfterSeconds": 7 },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "reads the wait from the Retry-After header",
+      "config": { "maxRetries": 3 },
+      "exchanges": [{ "status": 429, "body": {}, "headers": { "Retry-After": "9" } }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is rate-limiting this shop.", "retryAfterSeconds": 9 },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "does not retry not_found",
+      "config": { "maxRetries": 3 },
+      "exchanges": [{ "status": 404, "body": { "claimed": false, "reason": "not_found" } }],
+      "outcome": { "outcome": "PENDING_ARRIVAL" },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "does not retry already_claimed",
+      "config": { "maxRetries": 3 },
+      "exchanges": [{ "status": 409, "body": { "claimed": false, "reason": "already_claimed" } }],
+      "outcome": { "outcome": "ALREADY_CLAIMED", "claimedAt": null },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "does not retry amount_mismatch",
+      "config": { "maxRetries": 3 },
+      "exchanges": [{ "status": 422, "body": { "claimed": false, "reason": "amount_mismatch", "expected": 1250, "actual": 900 } }],
+      "outcome": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": 90000 },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "does not retry a refused credential",
+      "config": { "maxRetries": 3 },
+      "exchanges": [{ "status": 401, "body": { "claimed": false, "reason": "unauthenticated" } }],
+      "outcome": { "outcome": "MISCONFIGURED", "reason": "The payment gateway did not accept this shop's credential." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": ["Payment gateway refused our credential: unauthenticated"]
+    },
+    {
+      "name": "stops retrying when the time budget is spent",
+      "config": { "maxRetries": 10, "totalBudgetMs": 1200 },
+      "exchanges": [{ "networkError": "fetch failed" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway could not be reached: fetch failed" },
+      "callCount": 2,
+      "sleeps": [250],
+      "logs": []
+    },
+    {
+      "name": "clips the retry's timeout to what is left of the budget",
+      "config": { "timeoutMs": 5000, "totalBudgetMs": 8000 },
+      "exchanges": [{ "timeout": true, "takesMs": 5000 }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway did not answer within 2750 ms." },
+      "callCount": 2,
+      "sleeps": [250],
+      "logs": []
+    },
+    {
+      "name": "clips the first attempt to the budget",
+      "config": { "timeoutMs": 5000, "totalBudgetMs": 3000, "maxRetries": 0 },
+      "exchanges": [{ "timeout": true, "takesMs": 3000 }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway did not answer within 3000 ms." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "no retry when a slow attempt used the budget up",
+      "config": { "timeoutMs": 5000, "totalBudgetMs": 5200 },
+      "exchanges": [{ "timeout": true, "takesMs": 5000 }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway did not answer within 5000 ms." },
+      "callCount": 1,
+      "sleeps": [],
+      "logs": []
+    },
+    {
+      "name": "the wallet resend gets a budget of its own",
+      "config": { "maxRetries": 1 },
+      "request": { "platform": "nagad" },
+      "exchanges": [
+        { "status": 409, "body": { "claimed": false, "reason": "ambiguous_trx" } },
+        { "status": 503, "body": {} },
+        { "status": 201, "body": { "$merge": ["$claimedBody", { "platform": "nagad" }] } }
+      ],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "nagad", "paidPoisha": 130000, "overpaidPoisha": 5000, "underpaidPoisha": 0, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "callCount": 3,
+      "sleeps": [250],
+      "logs": []
+    },
+
+    {
+      "name": "an accepted shortfall is sent on every attempt, including the wallet resend, and claims short",
+      "request": { "acceptShortfall": true, "platform": "nagad" },
+      "exchanges": [
+        { "status": 409, "body": { "claimed": false, "reason": "ambiguous_trx", "platforms": ["bkash", "nagad"] } },
+        { "status": 201, "body": { "$merge": ["$claimedBody", { "platform": "nagad", "amount": 900, "overpaidBy": 0, "underpaidBy": 350 }] } }
+      ],
+      "outcome": { "outcome": "CLAIMED", "trxId": "8F3K2M9X01", "platform": "nagad", "paidPoisha": 90000, "overpaidPoisha": 0, "underpaidPoisha": 35000, "claimedAt": "2026-10-21T08:14:02.000Z", "replay": false },
+      "calls": [
+        { "body": { "$merge": ["$sentBody", { "acceptShortfall": true }] } },
+        { "body": { "$merge": ["$sentBody", { "platform": "nagad", "acceptShortfall": true }] } }
+      ],
+      "sleeps": [],
+      "logs": []
+    },
+
+    {
+      "name": "an environment with no gateway claims nothing",
+      "config": { "baseUrl": null, "clientId": "", "secret": null },
+      "exchanges": [{ "status": 201, "body": "$claimedBody" }],
+      "outcome": { "outcome": "UNAVAILABLE", "reason": "The payment gateway is not configured." },
+      "callCount": 0,
+      "sleeps": [],
+      "logs": []
+    }
+  ]
+}

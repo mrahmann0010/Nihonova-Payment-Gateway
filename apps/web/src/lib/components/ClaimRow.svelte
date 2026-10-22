@@ -75,6 +75,18 @@
     </div>
   {/if}
 
+  {#if claim.underpaidBy > 0}
+    <!-- The business took a short payment on purpose. Shown so the gap is on
+         record here too, not only in that business's own books. -->
+    <div
+      class="mt-3 rounded-control border border-warn-border bg-warn-bg px-3.5 py-2.5 text-label
+        leading-normal text-warn-text"
+    >
+      <span class="font-bold text-warn-ink">Accepted short by {money(claim.underpaidBy)}.</span>
+      Order was {money(claim.expectedAmount)}, {money(claim.amount)} arrived.
+    </div>
+  {/if}
+
   {#if released}
     <div class="mt-3 rounded-control border border-line bg-panel px-3.5 py-2.5">
       <div class="text-nano text-ink-soft">

@@ -1,4 +1,13 @@
+import {
+  FAST_RETRY_DELAYS_SECONDS,
+  LATE_RETRY_ATTEMPTS,
+  LATE_RETRY_INTERVAL_SECONDS,
+  RETRYABLE_OUTCOMES,
+} from "../contract/spec.generated";
 import type { ClaimOutcome } from "../resources/claims/types";
+
+// The schedule itself lives in spec.json, shared with every other SDK.
+export { FAST_RETRY_DELAYS_SECONDS, LATE_RETRY_ATTEMPTS, LATE_RETRY_INTERVAL_SECONDS };
 
 /* --------------------------------------------------------------------------
    When an app should ask the gateway again.
@@ -18,14 +27,9 @@ import type { ClaimOutcome } from "../resources/claims/types";
    the answer.
    -------------------------------------------------------------------------- */
 
-/** 5s, 10s, 20s, then every 30s — about four minutes in all. */
-export const FAST_RETRY_DELAYS_SECONDS = [5, 10, 20, 30, 30, 30, 30, 30, 30, 30] as const;
-
-/** After the fast schedule, for orders already granted by staff. */
-export const LATE_RETRY_INTERVAL_SECONDS = 10 * 60;
-
-/** Eight hours of late retries. */
-export const LATE_RETRY_ATTEMPTS = 48;
+// FAST_RETRY_DELAYS_SECONDS: 5s, 10s, 20s, then every 30s — about four minutes.
+// LATE_RETRY_INTERVAL_SECONDS × LATE_RETRY_ATTEMPTS: every 10 minutes for eight
+// hours, after the fast schedule, for orders staff have already granted.
 
 /**
  * Seconds until the next try, or null to stop.
@@ -60,5 +64,5 @@ export function nextRetryDelaySeconds(
  * one from `nextClaimKey`.)
  */
 export function isRetryable(outcome: ClaimOutcome): boolean {
-  return outcome.outcome === "PENDING_ARRIVAL" || outcome.outcome === "UNAVAILABLE";
+  return (RETRYABLE_OUTCOMES as readonly string[]).includes(outcome.outcome);
 }

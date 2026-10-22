@@ -1,3 +1,4 @@
+import type { OUTCOMES, REJECTIONS } from "../../contract/spec.generated";
 import type { Platform } from "../../contract/wire";
 
 /* --------------------------------------------------------------------------
@@ -36,6 +37,13 @@ export type ClaimRequest = {
    * "require sender match" switched on; the gateway compares the last digits.
    */
   senderPhone?: string;
+  /**
+   * Claim the payment even if it is short of `expectedPoisha`, and report
+   * what is still owed as `underpaidPoisha`. For a person who has looked at a
+   * short payment and decided to take it, never for an automatic checkout.
+   * Only `true` counts; anything else leaves an underpayment UNDERPAID.
+   */
+  acceptShortfall?: boolean;
 };
 
 /** Why the gateway refused a payment that does exist. */
@@ -50,19 +58,26 @@ export type ClaimRejection =
   | "AMBIGUOUS";
 
 export type ClaimOutcome =
-  /** We own this payment. `replay` is true when it was our own earlier claim. */
+  /**
+   * We own this payment. `replay` is true when it was our own earlier claim.
+   * `underpaidPoisha` is above 0 only when the request accepted a shortfall.
+   */
   | {
       outcome: "CLAIMED";
       trxId: string;
       platform: Platform;
       paidPoisha: number;
       overpaidPoisha: number;
+      underpaidPoisha: number;
       claimedAt: Date;
       replay: boolean;
     }
   /** The SMS has not reached the gateway yet. Retry later with the same key. */
   | { outcome: "PENDING_ARRIVAL" }
-  /** The payment exists and is short. It stays unclaimed so the customer can top up. */
+  /**
+   * The payment exists and is short. It stays unclaimed so the customer can
+   * top up, or a person can claim it again with `acceptShortfall: true`.
+   */
   | { outcome: "UNDERPAID"; expectedPoisha: number; paidPoisha: number | null }
   /** Another order or business has already spent this payment. */
   | { outcome: "ALREADY_CLAIMED"; claimedAt: Date | null }
@@ -76,3 +91,10 @@ export type ClaimOutcome =
   | { outcome: "UNAVAILABLE"; reason: string; retryAfterSeconds?: number };
 
 export type ClaimOutcomeName = ClaimOutcome["outcome"];
+
+// The unions above are written out for their doc comments; these lines fail
+// the build if they ever drift from the lists in spec.json.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+export type _OutcomesMatchSpec = Assert<Same<ClaimOutcomeName, (typeof OUTCOMES)[number]>>;
+export type _RejectionsMatchSpec = Assert<Same<ClaimRejection, (typeof REJECTIONS)[number]>>;

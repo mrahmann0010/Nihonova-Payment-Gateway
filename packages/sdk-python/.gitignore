@@ -1,0 +1,8 @@
+# Local environment and tool caches. uv.lock IS committed: `uv run --frozen` in
+# the shared check installs exactly what it pins.
+.venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+dist/

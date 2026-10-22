@@ -71,6 +71,9 @@ function serializeClaim(doc) {
     // the business can refund or credit it — the one thing that must not happen
     // is the surplus quietly disappearing.
     overpaidBy: doc.overpaidBy,
+    // Non-zero only when the caller accepted a short payment: what the
+    // customer still owes. Rows from before the field read as 0.
+    underpaidBy: doc.underpaidBy ?? 0,
     orderRef:   doc.orderRef,
     idempotencyKey: doc.idempotencyKey,
     claimedAt:  doc.claimedAt,
@@ -137,7 +140,8 @@ async function findPayment(trxId, platform) {
 
 // ---------------------------------------------------------------------------
 // POST /v1/claims
-//   { trxId, expectedAmount, idempotencyKey, orderRef?, platform?, senderPhone? }
+//   { trxId, expectedAmount, idempotencyKey, orderRef?, platform?, senderPhone?,
+//     acceptShortfall? }
 // ---------------------------------------------------------------------------
 router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
   const body   = req.body ?? {};
@@ -174,6 +178,12 @@ router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
   const senderPhone = String(body.senderPhone ?? '').trim();
   if (client.requireSenderMatch && !senderPhone)
     return refuse(res, 400, 'invalid_request', { detail: 'senderPhone is required for this client' });
+
+  // A real boolean only. Coercing "false" to true would accept less money than
+  // the caller meant to.
+  if (body.acceptShortfall != null && typeof body.acceptShortfall !== 'boolean')
+    return refuse(res, 400, 'invalid_request', { detail: 'acceptShortfall must be true or false' });
+  const acceptShortfall = body.acceptShortfall === true;
 
   try {
     // --- Step 1: idempotent replay ---
@@ -235,7 +245,12 @@ router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
 
     // Underpayment is refused, and the payment stays claimable — the student
     // can top it up, or support can handle it, without the money being stuck.
-    if (payment.amount < expectedAmount) {
+    // `acceptShortfall` is how support handles it: a person in the consuming
+    // app has decided to take the short payment. It grants the caller nothing
+    // new — sending a lower expectedAmount would claim it too — but it keeps
+    // the real order total on the row, so the shortfall is on record.
+    const short = payment.amount < expectedAmount;
+    if (short && !acceptShortfall) {
       return refuse(res, 422, 'amount_mismatch', {
         expected: expectedAmount,
         actual:   payment.amount,
@@ -244,7 +259,9 @@ router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
 
     // Overpayment claims, and records the surplus (step 5). Refusing it would
     // block a paying customer at checkout for having paid too much.
-    const overpaidBy = payment.amount - expectedAmount;
+    const overpaidBy  = short ? 0 : payment.amount - expectedAmount;
+    // Rounded to the poisha: 1250.5 - 900.2 is not 350.3 in floating point.
+    const underpaidBy = short ? Math.round((expectedAmount - payment.amount) * 100) / 100 : 0;
 
     if (client.maxClaimAmount != null && payment.amount > client.maxClaimAmount) {
       return refuse(res, 422, 'exceeds_max_claim', {
@@ -281,6 +298,7 @@ router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
         sender:   payment.sender,
         expectedAmount,
         overpaidBy,
+        underpaidBy,
         clientId: client.clientId,
         orderRef,
         idempotencyKey,
@@ -321,6 +339,7 @@ router.post('/claims', requireClient, rateLimitGate, async (req, res, next) => {
       by:       client.clientId,
       order:    orderRef || undefined,
       over:     overpaidBy || undefined,
+      short:    underpaidBy || undefined,
     });
 
     res.status(201).json(serializeClaim(claim));

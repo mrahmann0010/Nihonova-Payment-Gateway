@@ -1,0 +1,279 @@
+{
+  "description": "Every row of the reason → outcome table, end to end against a real apps/server and a throwaway database. Cases run in order and share state (a payment claimed in one case stays claimed). Each SDK runs this file through its own client. Expectations are partial: only the listed fields are compared. {\"$isDate\": true} is any ISO timestamp, {\"$matches\": \"re\"} a regular expression, {\"$between\": [a, b]} an inclusive range.",
+
+  "claimRateLimit": 60,
+
+  "clients": [
+    { "clientId": "contract-a" },
+    { "clientId": "contract-b" },
+    { "clientId": "contract-strict", "requireSenderMatch": true, "maxClaimAmount": 5000, "claimWindowDays": 30 },
+    { "clientId": "contract-off", "active": false },
+    { "clientId": "contract-limit" }
+  ],
+
+  "payments": [
+    { "platform": "bkash", "trxId": "CTOK1", "amount": 1250 },
+    { "platform": "bkash", "trxId": "CTOVER1", "amount": 1300 },
+    { "platform": "bkash", "trxId": "CTUNDER1", "amount": 900 },
+    { "platform": "bkash", "trxId": "CTSHORT1", "amount": 900 },
+    { "platform": "bkash", "trxId": "CTFRAC1", "amount": 1250.5 },
+    { "platform": "nagad", "trxId": "CTNORM1", "amount": 500 },
+    { "platform": "rocket", "trxId": "CTROCKET1", "amount": 700 },
+    { "platform": "bkash", "trxId": "CTDUP1", "amount": 800 },
+    { "platform": "nagad", "trxId": "CTDUP1", "amount": 800 },
+    { "platform": "bkash", "trxId": "CTDUP2", "amount": 800 },
+    { "platform": "nagad", "trxId": "CTDUP2", "amount": 800 },
+    { "platform": "bkash", "trxId": "CTREL1", "amount": 1000 },
+    { "platform": "bkash", "trxId": "CTRACE1", "amount": 1000 },
+    { "platform": "bkash", "trxId": "CTKEY1", "amount": 1000 },
+    { "platform": "bkash", "trxId": "CTKEY2", "amount": 1000 },
+    { "platform": "bkash", "trxId": "CTOLD1", "amount": 1000, "sender": "01712345678", "daysAgo": 60 },
+    { "platform": "bkash", "trxId": "CTBIG1", "amount": 9000, "sender": "01712345678" },
+    { "platform": "bkash", "trxId": "CTSEND1", "amount": 1000, "sender": "01712345678" }
+  ],
+
+  "$comment_connections": "How each SDK client is built. `clientId` alone uses that client's seeded secret. `secret: \"$fresh\"` is a random wrong one; `secretOf` borrows another client's; `pathSuffix` is appended to the gateway URL; `baseUrl: \"$dead\"` is a port nothing listens on.",
+  "connections": {
+    "a": { "clientId": "contract-a" },
+    "b": { "clientId": "contract-b" },
+    "strict": { "clientId": "contract-strict" },
+    "limit": { "clientId": "contract-limit" },
+    "off": { "clientId": "contract-off" },
+    "wrongSecret": { "clientId": "contract-a", "secret": "$fresh" },
+    "ghost": { "clientId": "contract-ghost", "secretOf": "contract-a" },
+    "lost": { "clientId": "contract-a", "pathSuffix": "/nope" },
+    "down": { "clientId": "contract-a", "baseUrl": "$dead", "timeoutMs": 1000, "totalBudgetMs": 2000 }
+  },
+
+  "cases": [
+    {
+      "group": "CLAIMED",
+      "name": "claims a fresh payment (201), converting taka to poisha",
+      "steps": [
+        {
+          "claim": { "as": "a", "trxId": "CTOK1", "taka": 1250, "key": "A-1:1" },
+          "expect": { "outcome": "CLAIMED", "trxId": "CTOK1", "platform": "bkash", "paidPoisha": 125000, "overpaidPoisha": 0, "underpaidPoisha": 0, "replay": false, "claimedAt": { "$isDate": true } }
+        }
+      ]
+    },
+    {
+      "group": "CLAIMED",
+      "name": "replays our own claim (200) when the same key is sent again",
+      "steps": [{ "claim": { "as": "a", "trxId": "CTOK1", "taka": 1250, "key": "A-1:1" }, "expect": { "outcome": "CLAIMED", "replay": true } }]
+    },
+    {
+      "group": "CLAIMED",
+      "name": "records an overpayment in poisha",
+      "steps": [
+        { "claim": { "as": "a", "trxId": "CTOVER1", "taka": 1250, "key": "A-2:1" }, "expect": { "outcome": "CLAIMED", "paidPoisha": 130000, "overpaidPoisha": 5000 } }
+      ]
+    },
+    {
+      "group": "CLAIMED",
+      "name": "keeps fractional taka exact",
+      "steps": [
+        { "claim": { "as": "a", "trxId": "CTFRAC1", "poisha": 125050, "key": "A-3:1" }, "expect": { "outcome": "CLAIMED", "paidPoisha": 125050, "overpaidPoisha": 0 } }
+      ]
+    },
+    {
+      "group": "CLAIMED",
+      "name": "finds a payment typed in lowercase with spaces and dashes, on another platform",
+      "steps": [
+        { "claim": { "as": "a", "trxId": " ct-norm 1 ", "taka": 500, "key": "A-4:1" }, "expect": { "outcome": "CLAIMED", "trxId": "CTNORM1", "platform": "nagad" } }
+      ]
+    },
+    {
+      "group": "CLAIMED",
+      "name": "claims a rocket payment",
+      "steps": [{ "claim": { "as": "a", "trxId": "CTROCKET1", "taka": 700, "key": "A-5:1" }, "expect": { "outcome": "CLAIMED", "platform": "rocket" } }]
+    },
+
+    {
+      "group": "single use across businesses",
+      "name": "refuses another business the same payment",
+      "steps": [
+        { "claim": { "as": "b", "trxId": "CTOK1", "taka": 1250, "key": "B-1:1" }, "expect": { "outcome": "ALREADY_CLAIMED", "claimedAt": { "$isDate": true } } }
+      ]
+    },
+    {
+      "group": "single use across businesses",
+      "name": "refuses our own payment under a NEW key — which is why keys are reused",
+      "steps": [{ "claim": { "as": "a", "trxId": "CTOK1", "taka": 1250, "key": "A-1:2" }, "expect": { "outcome": "ALREADY_CLAIMED" } }]
+    },
+    {
+      "group": "single use across businesses",
+      "name": "lets exactly one of two simultaneous claims win",
+      "steps": [
+        {
+          "parallel": [
+            { "as": "a", "trxId": "CTRACE1", "taka": 1000, "key": "A-RACE:1" },
+            { "as": "b", "trxId": "CTRACE1", "taka": 1000, "key": "B-RACE:1" }
+          ],
+          "expectOutcomes": ["ALREADY_CLAIMED", "CLAIMED"]
+        }
+      ]
+    },
+
+    {
+      "group": "PENDING_ARRIVAL",
+      "name": "is not_found until the SMS lands, then the same key claims it",
+      "steps": [
+        { "claim": { "as": "a", "trxId": "CTLATE1", "taka": 600, "key": "A-LATE:1" }, "expectExactly": { "outcome": "PENDING_ARRIVAL" } },
+        { "seedPayments": [{ "platform": "bkash", "trxId": "CTLATE1", "amount": 600 }] },
+        { "claim": { "as": "a", "trxId": "CTLATE1", "taka": 600, "key": "A-LATE:1" }, "expect": { "outcome": "CLAIMED", "replay": false } }
+      ]
+    },
+
+    {
+      "group": "UNDERPAID",
+      "name": "refuses a short payment and leaves it claimable",
+      "steps": [
+        {
+          "claim": { "as": "a", "trxId": "CTUNDER1", "taka": 1250, "key": "A-6:1" },
+          "expectExactly": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": 90000 }
+        },
+        { "claim": { "as": "a", "trxId": "CTUNDER1", "taka": 900, "key": "A-6:2" }, "expect": { "outcome": "CLAIMED" } }
+      ]
+    },
+    {
+      "group": "UNDERPAID",
+      "name": "claims a short payment when the shortfall is accepted, under the same key, and replays it",
+      "steps": [
+        {
+          "claim": { "as": "a", "trxId": "CTSHORT1", "taka": 1250, "key": "A-SHORT:1" },
+          "expectExactly": { "outcome": "UNDERPAID", "expectedPoisha": 125000, "paidPoisha": 90000 }
+        },
+        {
+          "claim": { "as": "a", "trxId": "CTSHORT1", "taka": 1250, "key": "A-SHORT:1", "acceptShortfall": true },
+          "expect": { "outcome": "CLAIMED", "paidPoisha": 90000, "overpaidPoisha": 0, "underpaidPoisha": 35000, "replay": false }
+        },
+        {
+          "claim": { "as": "a", "trxId": "CTSHORT1", "taka": 1250, "key": "A-SHORT:1", "acceptShortfall": true },
+          "expect": { "outcome": "CLAIMED", "underpaidPoisha": 35000, "replay": true }
+        },
+        { "claim": { "as": "b", "trxId": "CTSHORT1", "taka": 900, "key": "B-SHORT:1" }, "expect": { "outcome": "ALREADY_CLAIMED" } }
+      ]
+    },
+
+    {
+      "group": "RELEASED",
+      "name": "replays a released claim as RELEASED, and a new key claims it again",
+      "steps": [
+        { "claim": { "as": "a", "trxId": "CTREL1", "taka": 1000, "key": "A-REL:1" }, "expect": { "outcome": "CLAIMED" } },
+        { "release": { "trxId": "CTREL1", "reason": "contract test refund" }, "expectStatus": 200 },
+        { "claim": { "as": "a", "trxId": "CTREL1", "taka": 1000, "key": "A-REL:1" }, "expect": { "outcome": "RELEASED", "releasedAt": { "$isDate": true } } },
+        { "claim": { "as": "a", "trxId": "CTREL1", "taka": 1000, "key": "A-REL:2" }, "expect": { "outcome": "CLAIMED", "replay": false } }
+      ]
+    },
+    {
+      "group": "RELEASED",
+      "name": "lets another business claim a released payment",
+      "steps": [
+        { "release": { "trxId": "CTREL1", "reason": "contract test reassign" }, "expectStatus": 200 },
+        { "claim": { "as": "b", "trxId": "CTREL1", "taka": 1000, "key": "B-REL:1" }, "expect": { "outcome": "CLAIMED" } }
+      ]
+    },
+
+    {
+      "group": "REJECTED",
+      "name": "is AMBIGUOUS when the ID is on two wallets and no hint is given",
+      "steps": [{ "claim": { "as": "a", "trxId": "CTDUP2", "taka": 800, "key": "A-7:1" }, "expect": { "outcome": "REJECTED", "rejection": "AMBIGUOUS" } }]
+    },
+    {
+      "group": "REJECTED",
+      "name": "settles an ambiguous ID with the wallet hint",
+      "steps": [
+        { "claim": { "as": "a", "trxId": "CTDUP1", "taka": 800, "key": "A-8:1", "platform": "nagad" }, "expect": { "outcome": "CLAIMED", "platform": "nagad" } }
+      ]
+    },
+    {
+      "group": "REJECTED",
+      "name": "is TOO_OLD outside the client's claim window",
+      "steps": [
+        {
+          "claim": { "as": "strict", "trxId": "CTOLD1", "taka": 1000, "key": "S-1:1", "senderPhone": "01712345678" },
+          "expect": { "outcome": "REJECTED", "rejection": "TOO_OLD" }
+        }
+      ]
+    },
+    {
+      "group": "REJECTED",
+      "name": "is OVER_LIMIT above the client's ceiling",
+      "steps": [
+        {
+          "claim": { "as": "strict", "trxId": "CTBIG1", "taka": 9000, "key": "S-2:1", "senderPhone": "01712345678" },
+          "expect": { "outcome": "REJECTED", "rejection": "OVER_LIMIT" }
+        }
+      ]
+    },
+    {
+      "group": "REJECTED",
+      "name": "is SENDER_MISMATCH for the wrong payer, and CLAIMED for the right one with a country code",
+      "steps": [
+        {
+          "claim": { "as": "strict", "trxId": "CTSEND1", "taka": 1000, "key": "S-3:1", "senderPhone": "01899999999" },
+          "expect": { "outcome": "REJECTED", "rejection": "SENDER_MISMATCH" }
+        },
+        { "claim": { "as": "strict", "trxId": "CTSEND1", "taka": 1000, "key": "S-3:2", "senderPhone": "+8801712345678" }, "expect": { "outcome": "CLAIMED" } }
+      ]
+    },
+
+    {
+      "group": "MISCONFIGURED",
+      "name": "when a key is reused for a different transaction",
+      "steps": [
+        { "claim": { "as": "a", "trxId": "CTKEY1", "taka": 1000, "key": "A-KEY:1" }, "expect": { "outcome": "CLAIMED" } },
+        { "claim": { "as": "a", "trxId": "CTKEY2", "taka": 1000, "key": "A-KEY:1" }, "expect": { "outcome": "MISCONFIGURED", "reason": { "$matches": "different transaction" } } }
+      ]
+    },
+    {
+      "group": "MISCONFIGURED",
+      "name": "when a sender-match client sends no phone (invalid_request)",
+      "steps": [
+        { "claim": { "as": "strict", "trxId": "CTSEND1", "taka": 1000, "key": "S-4:1" }, "expect": { "outcome": "MISCONFIGURED", "reason": { "$matches": "senderPhone" } } }
+      ]
+    },
+    {
+      "group": "MISCONFIGURED",
+      "name": "when the secret is wrong",
+      "steps": [
+        { "claim": { "as": "wrongSecret", "trxId": "CTOK1", "taka": 1250, "key": "A-1:1" }, "expect": { "outcome": "MISCONFIGURED", "reason": { "$matches": "credential" } } }
+      ]
+    },
+    {
+      "group": "MISCONFIGURED",
+      "name": "when the client ID does not exist",
+      "steps": [{ "claim": { "as": "ghost", "trxId": "CTOK1", "taka": 1250, "key": "G-1:1" }, "expect": { "outcome": "MISCONFIGURED" } }]
+    },
+    {
+      "group": "MISCONFIGURED",
+      "name": "when the business is deactivated",
+      "steps": [
+        { "claim": { "as": "off", "trxId": "CTOK1", "taka": 1250, "key": "O-1:1" }, "expect": { "outcome": "MISCONFIGURED", "reason": { "$matches": "deactivated" } } }
+      ]
+    },
+    {
+      "group": "MISCONFIGURED",
+      "name": "when the base URL points at the wrong path",
+      "steps": [{ "claim": { "as": "lost", "trxId": "CTOK1", "taka": 1250, "key": "A-1:1" }, "expect": { "outcome": "MISCONFIGURED" } }]
+    },
+
+    {
+      "group": "UNAVAILABLE",
+      "name": "when the gateway is rate-limiting this client, with a wait",
+      "steps": [
+        {
+          "claimMany": { "as": "limit", "times": 61, "trxIdPrefix": "CTNONE", "keyPrefix": "L-", "taka": 100 },
+          "expectLast": { "outcome": "UNAVAILABLE", "retryAfterSeconds": { "$between": [1, 60] } }
+        }
+      ]
+    },
+    {
+      "group": "UNAVAILABLE",
+      "name": "when nothing is listening, without throwing",
+      "steps": [
+        { "claim": { "as": "down", "trxId": "CTOK1", "taka": 1250, "key": "A-1:1" }, "expect": { "outcome": "UNAVAILABLE", "reason": { "$matches": "could not be reached" } } }
+      ]
+    }
+  ]
+}

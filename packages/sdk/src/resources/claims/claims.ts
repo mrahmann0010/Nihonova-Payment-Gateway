@@ -1,3 +1,4 @@
+import { message } from "../../helpers/format";
 import type { GatewayLogger } from "../../logger";
 import type { HttpResult } from "../../transport/http";
 import { type RetryDeps, type RetryPolicy, withRetry } from "../../transport/retry";
@@ -32,13 +33,15 @@ export type ClaimsContext =
 export function createClaimsResource(ctx: ClaimsContext): ClaimsResource {
   async function claim(request: ClaimRequest): Promise<ClaimOutcome> {
     if (!ctx.enabled) {
-      return { outcome: "UNAVAILABLE", reason: "The payment gateway is not configured." };
+      return { outcome: "UNAVAILABLE", reason: message("notConfigured") };
     }
 
     try {
       const problem = requestProblem(request);
       if (problem) {
-        ctx.logger.error(`Refusing to send a bad claim for ${request?.orderRef ?? "?"}: ${problem}`);
+        ctx.logger.error(
+          message("refusingBadClaimLog", { orderRef: request?.orderRef ?? "?", problem }),
+        );
         return { outcome: "MISCONFIGURED", reason: problem };
       }
 
@@ -48,7 +51,7 @@ export function createClaimsResource(ctx: ClaimsContext): ClaimsResource {
       // says the ID exists on two wallets is the customer's choice used.
       let outcome = await send({ ...request, platform: undefined });
 
-      if (outcome.outcome === "REJECTED" && outcome.rejection === "AMBIGUOUS" && request.platform) {
+      if (outcome.outcome === "REJECTED" && outcome.rejection === "AMBIGUOUS" && request.platform != null) {
         outcome = await send(request);
       }
 
@@ -56,8 +59,8 @@ export function createClaimsResource(ctx: ClaimsContext): ClaimsResource {
     } catch (error) {
       // Every path above already returns an outcome; this keeps the promise
       // ("never throws") even against a bug in the SDK itself.
-      ctx.logger.error(`Payment gateway claim failed unexpectedly: ${String(error)}`);
-      return { outcome: "UNAVAILABLE", reason: `Unexpected error: ${String(error)}` };
+      ctx.logger.error(message("unexpectedErrorLog", { error: String(error) }));
+      return { outcome: "UNAVAILABLE", reason: message("unexpectedError", { error: String(error) }) };
     }
   }
 
@@ -77,8 +80,8 @@ export function createClaimsResource(ctx: ClaimsContext): ClaimsResource {
             value: {
               outcome: "UNAVAILABLE",
               reason: http.timedOut
-                ? `The payment gateway did not answer within ${timeoutMs} ms.`
-                : `The payment gateway could not be reached: ${http.message}`,
+                ? message("timedOut", { timeoutMs })
+                : message("unreachable", { message: http.message }),
             },
           };
         }
@@ -87,6 +90,7 @@ export function createClaimsResource(ctx: ClaimsContext): ClaimsResource {
           ...(http.retryAfterSeconds !== undefined
             ? { retryAfterSeconds: http.retryAfterSeconds }
             : {}),
+          acceptShortfall: request.acceptShortfall === true,
           onUnexpected: (message) => logger.error(message),
         });
 
