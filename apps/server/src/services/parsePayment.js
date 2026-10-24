@@ -19,10 +19,13 @@ const parseBkashSms  = require('./bkashParser');
 const parseNagadSms  = require('./nagadParser');
 const parseRocketSms = require('./rocketParser');
 
+// bKash types that mean money arrived. Outgoing 'payment' is deliberately out.
+const BKASH_INCOMING = new Set(['received', 'deposit', 'ibanking_deposit', 'cash_in']);
+
 function parsePayment(text) {
   // --- bKash ---
   const bkash = parseBkashSms(text);
-  if (bkash && (bkash.type === 'received' || bkash.type === 'deposit' || bkash.type === 'ibanking_deposit')) {
+  if (bkash && BKASH_INCOMING.has(bkash.type)) {
     return {
       platform: 'bkash',
       amount: bkash.amount,

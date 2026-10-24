@@ -4,10 +4,12 @@
 // Returns a plain object with all parsed fields, or null if the text doesn't
 // match any known bKash SMS pattern.
 //
-// Three patterns are handled:
+// Five patterns are handled:
 //   1. Send Money received  — "You have received Tk <amount> from <phone>..."
 //   2. Cash In deposit      — "You have received a deposit of BDT <amount> from ..."
 //   3. Merchant / Pay Bill  — "Payment Tk <amount> to <merchant> from <phone>..."
+//   4. iBanking deposit     — "You have received deposit from iBanking of Tk ..."
+//   5. Agent Cash In        — "Cash In Tk <amount> from <phone> successful..."
 
 const { bdtToUtc } = require('./timeUtil');
 
@@ -111,6 +113,24 @@ const IBANKING_REGEX = new RegExp(
 );
 
 // ---------------------------------------------------------------------------
+// Pattern 5 — Agent Cash In
+// Example:
+//   "Cash In Tk 150.00 from 01841084718 successful. Fee Tk 0.00.
+//    Balance Tk 120,587.57. TrxID DJO6H4QS7O at 24/10/2026 17:25"
+//
+// This is the agent-account wording for money arriving from a customer's
+// wallet, so it carries a real sender phone number and counts as incoming.
+// "successful" is optional — some handsets drop it.
+// ---------------------------------------------------------------------------
+const CASH_IN_REGEX = new RegExp(
+  `Cash In (?:Tk|BDT) ${AMOUNT} from ${PHONE}(?:\\s+successful)?\\.\\s*` +
+  `Fee (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
+  `Balance (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
+  `TrxID ${TRXID} at ${DATE} ${TIME}`,
+  'i'
+);
+
+// ---------------------------------------------------------------------------
 // Main export — parseBkashSms(text)
 //
 // Tries each pattern in turn and returns a structured object on first match,
@@ -182,6 +202,24 @@ function parseBkashSms(text) {
       type: 'ibanking_deposit',
       amount: parseAmount(amount),
       senderNumber: null,
+      fee: parseAmount(fee),
+      balance: parseAmount(balance),
+      trxid: trxid.toUpperCase(),
+      bkashTimestamp: parseBkashDate(date, time),
+      rawDate: date,
+      rawTime: time,
+    };
+  }
+
+  // --- Pattern 5: Agent Cash In ---
+  match = text.match(CASH_IN_REGEX);
+  if (match) {
+    // Capture groups: 1=amount 2=phone 3=fee 4=balance 5=trxid 6=date 7=time
+    const [, amount, senderNumber, fee, balance, trxid, date, time] = match;
+    return {
+      type: 'cash_in',
+      amount: parseAmount(amount),
+      senderNumber,
       fee: parseAmount(fee),
       balance: parseAmount(balance),
       trxid: trxid.toUpperCase(),
