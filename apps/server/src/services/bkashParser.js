@@ -4,12 +4,30 @@
 // Returns a plain object with all parsed fields, or null if the text doesn't
 // match any known bKash SMS pattern.
 //
-// Five patterns are handled:
+// Six patterns are handled:
 //   1. Send Money received  — "You have received Tk <amount> from <phone>..."
 //   2. Cash In deposit      — "You have received a deposit of BDT <amount> from ..."
 //   3. Merchant / Pay Bill  — "Payment Tk <amount> to <merchant> from <phone>..."
 //   4. iBanking deposit     — "You have received deposit from iBanking of Tk ..."
 //   5. Agent Cash In        — "Cash In Tk <amount> from <phone> successful..."
+//   6. Merchant till        — "You have received payment Tk <amount> from <phone>..."
+//
+// MERCHANT ACCOUNT — pattern 6 is the merchant-account wording, and it is
+// parked here on purpose, ahead of the structural work. It reports type
+// 'received' like a personal-wallet payment, so these messages are parsed and
+// stored today with no schema, route or parsePayment change.
+//
+// The consequence to know: nothing in the database currently tells a merchant
+// payment apart from a personal one, and the "Ref" is matched but discarded
+// (the Bkash model has no `ref` field — only Nagad does). Neither is lost
+// permanently: every payment row stores the SMS verbatim in `rawMessage`, so
+// an `accountType` field can be added and backfilled from it later.
+//
+// When that work happens: give pattern 6 its own type (e.g.
+// 'merchant_received'), add that type to BKASH_INCOMING in parsePayment.js,
+// capture the Ref, and derive accountType from the matched pattern rather than
+// from any configuration. Account type is orthogonal to platform — a merchant
+// till is still bKash — so it belongs in a field, not in a fourth collection.
 
 const { bdtToUtc } = require('./timeUtil');
 
@@ -131,6 +149,31 @@ const CASH_IN_REGEX = new RegExp(
 );
 
 // ---------------------------------------------------------------------------
+// Pattern 6 — Merchant till payment received
+// Example:
+//   "You have received payment Tk 100.00 from 01791234000. Ref Test Payment.
+//    Fee Tk 0.00. Balance Tk 100.00. TrxID DK432CPXLP at 04/11/2026 22:43"
+//
+// Identical to pattern 1 apart from the inserted word "payment", which is the
+// merchant-account wording. That one word is also why this stays a SEPARATE
+// regex instead of a `(?:payment )?` option inside pattern 1: merging them
+// would throw away the only thing that distinguishes the two account types,
+// and that distinction is wanted later.
+//
+// The two are mutually exclusive — pattern 1 requires "received Tk" and will
+// not match "received payment Tk" — so the matching order below is safe.
+// "Ref" is optional and, as in pattern 1, matched without capturing.
+// ---------------------------------------------------------------------------
+const MERCHANT_REGEX = new RegExp(
+  `You have received payment (?:Tk|BDT) ${AMOUNT} from ${PHONE}\\.\\s*` +
+  `(?:Ref [^.]+\\.\\s*)?` +
+  `Fee (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
+  `Balance (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
+  `TrxID ${TRXID} at ${DATE} ${TIME}`,
+  'i'
+);
+
+// ---------------------------------------------------------------------------
 // Main export — parseBkashSms(text)
 //
 // Tries each pattern in turn and returns a structured object on first match,
@@ -218,6 +261,28 @@ function parseBkashSms(text) {
     const [, amount, senderNumber, fee, balance, trxid, date, time] = match;
     return {
       type: 'cash_in',
+      amount: parseAmount(amount),
+      senderNumber,
+      fee: parseAmount(fee),
+      balance: parseAmount(balance),
+      trxid: trxid.toUpperCase(),
+      bkashTimestamp: parseBkashDate(date, time),
+      rawDate: date,
+      rawTime: time,
+    };
+  }
+
+  // --- Pattern 6: Merchant till payment received ---
+  match = text.match(MERCHANT_REGEX);
+  if (match) {
+    // Capture groups: 1=amount 2=phone 3=fee 4=balance 5=trxid 6=date 7=time
+    const [, amount, senderNumber, fee, balance, trxid, date, time] = match;
+    return {
+      // Deliberately 'received', not a merchant-specific type: BKASH_INCOMING
+      // in parsePayment.js already accepts it, so these payments are stored
+      // without touching anything outside this file. See the MERCHANT ACCOUNT
+      // note at the top before changing this.
+      type: 'received',
       amount: parseAmount(amount),
       senderNumber,
       fee: parseAmount(fee),
