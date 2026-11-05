@@ -61,6 +61,11 @@ function parseBkashDate(dateStr, timeStr) {
 const AMOUNT = '([\\d,]+(?:\\.\\d+)?)';
 const TRXID  = '([A-Z0-9]{6,12})';
 const PHONE  = '(01[0-9]{9})';
+// Merchant-till SMS partially masks the customer's number ("0164XXXX868"): the
+// X's stand in for digits, in place, so the string is still 11 characters.
+// Scoped to pattern 6 on purpose — the personal-wallet formats print the number
+// in full, and widening PHONE would let a masked number through everywhere.
+const PHONE_MASKED = '(01[0-9X]{9})';
 const DATE   = '(\\d{2}/\\d{2}/\\d{4})';
 const TIME   = '(\\d{2}:\\d{2})';
 
@@ -163,9 +168,16 @@ const CASH_IN_REGEX = new RegExp(
 // The two are mutually exclusive — pattern 1 requires "received Tk" and will
 // not match "received payment Tk" — so the matching order below is safe.
 // "Ref" is optional and, as in pattern 1, matched without capturing.
+//
+// The sender may also arrive masked — "Tk 149.00 from 0164XXXX868. Fee Tk 0.00.
+// Balance Tk 599.00. TrxID DK562PA0IQ at 05/11/2026 10:18" — so the phone is
+// matched with PHONE_MASKED and stored exactly as the SMS printed it. The mask
+// is the payment's only payer identity, and it sits mid-number, so a client
+// with requireSenderMatch cannot be matched against it by trailing digits; see
+// senderMatches in routes/v1.js.
 // ---------------------------------------------------------------------------
 const MERCHANT_REGEX = new RegExp(
-  `You have received payment (?:Tk|BDT) ${AMOUNT} from ${PHONE}\\.\\s*` +
+  `You have received payment (?:Tk|BDT) ${AMOUNT} from ${PHONE_MASKED}\\.\\s*` +
   `(?:Ref [^.]+\\.\\s*)?` +
   `Fee (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
   `Balance (?:Tk|BDT) ${AMOUNT}\\.\\s*` +
